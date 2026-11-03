@@ -323,37 +323,48 @@
 
   /* ================================================================
    * 状态 3：STATE_PIPE_RHYTHM —— 节拍裱花
+   * 不限时：只要没点满 TOTAL_BEATS 朵，转盘就不停转，
+   * 漏掉的拍可以在下一圈同一位置补救；圈数不影响评分。
    * ================================================================ */
 
   var PIPE_RHYTHM = {
-    placedSet: null, placedCount: 0,
+    placedSet: null, placedCount: 0, doneAt: -1,
 
     enter: function () {
       Game.metronome.reset();
       Game.turntable.syncToBeat();
       this.placedSet = {};
       this.placedCount = 0;
-      showBanner('Step 3 · 裱花', '跟着♪节拍点击屏幕！', 1.5);
+      this.doneAt = -1;
+      showBanner('Step 3 · 裱花', '跟着♪节拍点满 ' + C.BEAT.TOTAL_BEATS + ' 朵奶油花！', 1.5);
     },
 
     update: function (dt) {
       Game.metronome.update(dt);   // 转盘由主循环统一驱动，此处不重复 update
-      var totalT = C.BEAT.TOTAL_BEATS * Game.metronome.interval;
-      if (Game.t >= totalT + 0.55) setState('TOPPING_DROP');
+      // 点满即收：不再按固定时长结束，漏拍者下一圈继续（圈数不限、不计入评分）
+      if (this.placedCount >= C.BEAT.TOTAL_BEATS) {
+        if (this.doneAt < 0) {
+          this.doneAt = Game.t;
+          log('裱花点满 ' + C.BEAT.TOTAL_BEATS + ' 朵，用时 ' + Game.t.toFixed(1) + 's（' + (Game.t / Game.metronome.interval / C.BEAT.FLOWERS_PER_CIRCLE).toFixed(2) + ' 圈）');
+        }
+        if (Game.t - this.doneAt >= 0.6) setState('TOPPING_DROP');
+      }
     },
 
     onDown: function () {
       var m = Game.metronome;
-      var idx = m.nearestIndex();
-      if (idx > C.BEAT.TOTAL_BEATS - 1) return;
+      var raw = m.nearestIndex();
+      // 拍位按总拍数取模：下一圈（乃至第 N 圈）转到同一位置即可补救这一拍
+      var idx = raw % C.BEAT.TOTAL_BEATS;
       if (this.placedSet[idx]) {
-        // 该拍已放花：不惩罚，轻声提示
-        log('裱花重复拍点 #' + idx + '，忽略');
+        // 该拍已有花（本圈或此前圈点过）：不惩罚，轻声提示
+        log('裱花重复拍点 #' + idx + '（原拍 ' + raw + '），忽略');
         Game.fx.text(LAYOUT.btnX, LAYOUT.btnY - 150, '这一拍有花啦♪', '#b48ead', 30);
         return;
       }
       this.placedSet[idx] = true;
       this.placedCount++;
+      if (raw >= C.BEAT.TOTAL_BEATS) log('跨圈补救：第 ' + (Math.floor(raw / C.BEAT.FLOWERS_PER_CIRCLE) + 1) + ' 圈补上拍 #' + idx);
 
       // 判定分级（阶段 2 香草将把负面判定统一改写为 Cute）
       var d = m.distToNearest();
@@ -434,9 +445,9 @@
       ctx.font = '24px "PingFang SC", "Microsoft YaHei", sans-serif';
       ctx.fillText('♪ 跟上节拍 ♪', LAYOUT.btnX, LAYOUT.btnY + 42);
 
-      // 顶部节拍进度点
+      // 顶部进度点：已放朵数（不再随时间走，漏拍不亮、补上才亮）
       var total = C.BEAT.TOTAL_BEATS;
-      var done = Utils.clamp(Math.round(m.beatPhase()), 0, total);
+      var done = this.placedCount;
       for (var k = 0; k < total; k++) {
         var dx = 375 + (k - (total - 1) / 2) * 34;
         ctx.beginPath();
