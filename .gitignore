@@ -178,6 +178,7 @@ credentials.json
 # config files (may carry keys) - exclude all, keep examples
 config.*
 !config.example.*
+!config.js
 !*.example.json
 
 # IDE / local tool state
