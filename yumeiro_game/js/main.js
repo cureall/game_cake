@@ -635,9 +635,33 @@
         c2.drawImage(v.canvas, 0, 0, w, h);
       }
       var d = new Date(), p2 = function (n) { return (n < 10 ? '0' : '') + n; };
-      var name = '蛋糕成果_' + d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) +
-        '_' + p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds()) + '.png';
+      var stamp = '' + d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) +
+        p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds());
+
+      /* 安卓手机（默认浏览器）：必须在本点击手势的同步调用栈内完成下载——
+       * toBlob 是异步回调，等它返回时 user activation 已过期，移动浏览器会静默拦截。
+       * 用同步 toDataURL 触发 <a download>，正常情况直接静默存入浏览器默认下载目录；
+       * 个别浏览器弹“确认下载”属系统行为，用户点确认即存。 */
+      if (/Android/i.test(navigator.userAgent)) {
+        try {
+          var url = out.toDataURL('image/png');
+          var ad = document.createElement('a');
+          ad.href = url;
+          ad.download = 'yumeiro_cake_' + stamp + '.png';
+          document.body.appendChild(ad);
+          ad.click();
+          document.body.removeChild(ad);
+          showBanner('成果已经保存~', '', 2.0);   // 浮动提示 2 秒后消失
+          log('成果图已触发保存（安卓下载目录）：' + ad.download);
+          return;
+        } catch (e) {
+          log('安卓同步下载被拦，回退通用流程：' + (e && e.message));
+        }
+      }
+
+      /* PC / 兜底：异步 toBlob（桌面浏览器不依赖手势，无拦截问题） */
       var self = this;
+      var name = '蛋糕成果_' + stamp + '.png';
       if (!out.toBlob) { log('当前浏览器不支持 toBlob，无法导出'); return; }
       out.toBlob(function (blob) {
         if (blob) self.savePng(blob, name);
