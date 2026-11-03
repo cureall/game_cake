@@ -571,10 +571,11 @@
 
   var EVALUATION = {
     total: 0, stars: 1, title: '', praise: '', readyT: 0,
+    viewer3d: null,                        // 3D 展台实例（cake3d.js，退出时 destroy）
     btn2: { x: 560, y: 1200, r: 105 },   // “再来一块”按钮（渲染与点击判定共用）
+    btnSave: { x: 622, y: 168, w: 196, h: 60 },   // “保存成果”小胶囊按钮（右上角）
 
     enter: function () {
-      Game.turntable.target = 0.35;   // 缓缓旋转展示
       var s = Game.score;
       s.even = this.calcEvenBonus();
       s.total = s.bake + s.flowers * C.SCORE.FLOWER + s.perfects * C.SCORE.PERFECT_BONUS + s.fruits * C.SCORE.FRUIT + s.even;
@@ -584,8 +585,121 @@
       this.praise = C.GUEST.PRAISE[Math.floor(Math.random() * C.GUEST.PRAISE.length)];
       this.readyT = 0.3 + 5 * 0.22 + 0.15 + 0.7 + 0.5;
       log('结算：总分=' + this.total + '（含均匀度 +' + s.even + '） 星=' + this.stars + ' 称号=' + this.title);
+      this.startShowcase();
       showBanner('完成♪', '客人超级满意！', 1.4);
       Game.fx.burst(375, 480, { count: 24, colors: ['#ffc94d', '#ff8fb5', '#b8e6ff', '#fff'], speed: 420 });
+    },
+
+    exit: function () {
+      this.destroyShowcase();   // 离开 Step 4：彻底释放 WebGL 资源
+    },
+
+    /* ---- 3D 展台接入（new.md 任务 3）----
+     * 进入结算：组装 cakeData 并实例化 Cake3DViewer；
+     * THREE 缺失 / WebGL 创建失败时回退 2D 俯视缓缓旋转（保证可玩性）。 */
+    startShowcase: function () {
+      this.destroyShowcase();
+      try {
+        this.viewer3d = new global.Cake3DViewer(
+          document.getElementById('game-container'), this.buildCakeData());
+        log('3D 展台已挂载：flavor=' + this.viewer3d.data.flavor +
+          ' heightRatio=' + this.viewer3d.data.heightRatio.toFixed(2));
+      } catch (err) {
+        this.viewer3d = null;
+        Game.turntable.target = 0.35;   // 回退 2D：缓缓旋转展示
+        log('3D 展台不可用，回退 2D 展示：' + (err && err.message));
+      }
+    },
+
+    destroyShowcase: function () {
+      if (this.viewer3d) {
+        this.viewer3d.destroy();
+        this.viewer3d = null;
+        log('3D 展台已销毁，WebGL 资源释放完毕');
+      }
+    },
+
+    /* ---- 保存成果：合成 2D 主画布 + 3D 展台 → PNG ----
+     * 优先用 File System Access API 弹“另存为”（Chrome/Edge，可直选 html 所在目录）；
+     * 不支持（file:// 打开等）时回退浏览器下载。 */
+    capture: function () {
+      var w = canvas.width, h = canvas.height;
+      var out = document.createElement('canvas');
+      out.width = w; out.height = h;
+      var c2 = out.getContext('2d');
+      c2.drawImage(canvas, 0, 0);
+      var v = this.viewer3d;
+      if (v && !v.disposed && v.renderer) {
+        // WebGL 默认渲染后即清缓冲：截图前同步补渲染一帧再立即取图，保证 3D 不空白
+        try { v.renderer.render(v.scene, v.camera); } catch (e) { /* 已销毁则忽略 */ }
+        c2.drawImage(v.canvas, 0, 0, w, h);
+      }
+      var d = new Date(), p2 = function (n) { return (n < 10 ? '0' : '') + n; };
+      var name = '蛋糕成果_' + d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) +
+        '_' + p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds()) + '.png';
+      var self = this;
+      if (!out.toBlob) { log('当前浏览器不支持 toBlob，无法导出'); return; }
+      out.toBlob(function (blob) {
+        if (blob) self.savePng(blob, name);
+      }, 'image/png');
+    },
+
+    savePng: function (blob, name) {
+      var self = this;
+      if (window.showSaveFilePicker) {
+        window.showSaveFilePicker({
+          suggestedName: name,
+          types: [{ description: 'PNG 图片', accept: { 'image/png': ['.png'] } }]
+        }).then(function (h) {
+          return h.createWritable().then(function (wr) {
+            return wr.write(blob).then(function () { return wr.close(); });
+          });
+        }).then(function () {
+          showBanner('保存成功♪', name, 1.6);
+          log('成果图已保存：' + name);
+        }).catch(function (err) {
+          if (err && err.name !== 'AbortError') log('保存失败：' + (err && err.message));
+        });
+      } else {
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+        showBanner('已导出♪', '图片已开始下载', 1.6);
+        log('成果图已触发下载：' + name);
+      }
+    },
+
+    /* ---- cakeData 数据契约（new.md 任务 1）----
+     * Step 1~3 成果 → Step 4 渲染参数：
+     * flavor 取订单序，heightRatio 由蓄力高度线性映射到 0.6~1.4，
+     * creams / toppings 为蛋糕局部极坐标 → 顶面直角坐标（3D 半径 74）。 */
+    buildCakeData: function () {
+      var cake = Game.cake;
+      var FLAVORS = ['strawberry', 'matcha', 'chocolate'];   // 对应 C.ORDERS 顺序
+      var idx = C.ORDERS.indexOf(Game.order);
+      var heightRatio = Utils.clamp(
+        0.6 + (cake.height - C.CHARGE.MIN_HEIGHT) /
+          (C.CHARGE.MAX_HEIGHT - C.CHARGE.MIN_HEIGHT) * 0.8, 0.6, 1.4);
+      var creams = [], toppings = [];
+      for (var i = 0; i < cake.flowers.length; i++) {
+        creams.push({ angle: cake.flowers[i].a, tier: cake.flowers[i].tier });
+      }
+      for (var j = 0; j < cake.fruits.length; j++) {
+        var fr = cake.fruits[j];
+        var r3 = fr.r / cake.topRadius * 74;   // 虚拟顶半径 205 → 3D 胚半径 74
+        toppings.push({ type: fr.type, x: Math.cos(fr.a) * r3, z: Math.sin(fr.a) * r3 });
+      }
+      return {
+        flavor: FLAVORS[idx] || 'strawberry',
+        heightRatio: heightRatio,
+        creamType: 'vanilla',
+        creams: creams,
+        toppings: toppings
+      };
     },
 
     /** 顶料均匀度：所有水果恒落在同一圆环上，看局部角的相邻间隔是否接近整圆/n。
@@ -613,6 +727,13 @@
 
     onDown: function (p) {
       if (Game.t < this.readyT) return;
+      // 保存成果：胶囊按钮矩形命中
+      var sb = this.btnSave;
+      if (p.x >= sb.x - sb.w / 2 && p.x <= sb.x + sb.w / 2 &&
+          p.y >= sb.y - sb.h / 2 && p.y <= sb.y + sb.h / 2) {
+        this.capture();
+        return;
+      }
       // 再来一块：圆形按钮的外接矩形判定（渲染与判定共用 btn2，防止再次错位）
       var b = this.btn2, r = b.r;
       if (p.x >= b.x - r && p.x <= b.x + r && p.y >= b.y - r && p.y <= b.y + r) {
@@ -629,16 +750,19 @@
       var t = Game.t;
       var s = Game.score;
 
-      // 作品展示（缓缓旋转）
-      ctx.save();
-      ctx.translate(375, 480);
-      ctx.scale(0.86, 0.86);
-      ctx.translate(-375, -480);
-      E.Turntable.prototype.renderPlate(ctx, 375, 480, 250, Game.order.plate);
-      ctx.translate(375, 480);
-      ctx.rotate(Game.turntable.angle);
-      Game.cake.renderTop(ctx);
-      ctx.restore();
+      // 作品展示：优先 3D 旋转展台（WebGL 透明画布覆盖在背景之上、UI 之下）；
+      // 未挂载 3D（CDN 失败等）时回退 2D 俯视缓缓旋转
+      if (!this.viewer3d) {
+        ctx.save();
+        ctx.translate(375, 480);
+        ctx.scale(0.86, 0.86);
+        ctx.translate(-375, -480);
+        E.Turntable.prototype.renderPlate(ctx, 375, 480, 250, Game.order.plate);
+        ctx.translate(375, 480);
+        ctx.rotate(Game.turntable.angle);
+        Game.cake.renderTop(ctx);
+        ctx.restore();
+      }
 
       // 星星逐颗弹出
       for (var i = 0; i < 3; i++) {
@@ -710,10 +834,40 @@
         ctx.restore();
       }
 
-      // 客人夸奖
-      if (t > this.readyT - 0.4) {
+      // 客人夸奖：气泡只显示 1 秒即淡出，避免挡住下方“甜蜜分”
+      if (t > this.readyT - 0.4 && t < this.readyT + 0.6) {
         Game.guest.render(ctx, 108, 1200, 0.85);
+        var fade = Utils.clamp((this.readyT + 0.6 - t) / 0.25, 0, 1);   // 末尾 0.25s 淡出
+        ctx.save();
+        ctx.globalAlpha = fade;
         E.drawBubble(ctx, 300, 1080, this.praise, 24);
+        ctx.restore();
+      }
+
+      // 保存成果小按钮（右上角胶囊，与“再来一块”同时出现）
+      if (t > this.readyT) {
+        var sb = this.btnSave;
+        var rw = sb.w / 2, rh = sb.h / 2, rr = rh;
+        ctx.save();
+        ctx.translate(sb.x, sb.y);
+        ctx.beginPath();
+        ctx.moveTo(-rw + rr, -rh);
+        ctx.arcTo(rw, -rh, rw, rh, rr);
+        ctx.arcTo(rw, rh, -rw, rh, rr);
+        ctx.arcTo(-rw, rh, -rw, -rh, rr);
+        ctx.arcTo(-rw, -rh, rw, -rh, rr);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+        ctx.fill();
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = '#f0a7c0';
+        ctx.stroke();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = 'bold 28px "PingFang SC", "Microsoft YaHei", sans-serif';
+        ctx.fillStyle = '#e2557e';
+        ctx.fillText('保存成果', 0, 2);
+        ctx.restore();
       }
 
       // 再来一块按钮
@@ -809,7 +963,22 @@
   }
 
   resetScore();
-  setState('ORDER_SHOW');
+
+  /* ---- 调试直跳：URL 带 ?step=4 时跳过 Step 1~3，用模拟蛋糕直接进结算 ----
+   * 仅用于预览/调试 3D 展台（cake3d.js），无参数时流程完全不变。 */
+  if (/[?&]step=4/.test(location.search)) {
+    Game.order = C.ORDERS[0];
+    Game.cake = new E.Cake(Game.order);
+    Game.cake.height = 300;                        // 中等偏上 → heightRatio ≈ 1.18
+    for (var di = 0; di < 8; di++)                 // 8 朵裱花，内外圈交替
+      Game.cake.flowers.push({ a: di / 8 * TAU, tier: di % 2 });
+    for (var dj = 0; dj < 5; dj++)                 // 5 个顶料，草莓/马卡龙交替均匀摆放
+      Game.cake.fruits.push({ a: dj / 5 * TAU + 0.3, r: 150, type: dj % 2 ? 'macaron' : 'strawberry' });
+    Game.score.bake = 120; Game.score.flowers = 8; Game.score.perfects = 5; Game.score.fruits = 5;
+    setState('EVALUATION');
+  } else {
+    setState('ORDER_SHOW');
+  }
   requestAnimationFrame(frame);
 
 })(window);
