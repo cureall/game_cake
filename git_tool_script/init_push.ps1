@@ -148,7 +148,7 @@ try {
         Write-Host "git: initialized" -ForegroundColor Green
     }
     
-    # Git warnings (like LF/CRLF) are sent to stderr, which triggers Stop in PowerShell.
+    # Git warnings (like LF/CRLF) or missing remotes are sent to stderr, which triggers Stop in PowerShell.
     # We temporarily relax ErrorAction to avoid aborting on harmless warnings.
     $oldEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -168,8 +168,6 @@ try {
         }
     }
     
-    $ErrorActionPreference = $oldEAP
-    
     git branch -M master 2>$null | Out-Null
     
     # ---------- origin + push ----------
@@ -184,20 +182,25 @@ try {
     }
 
     if ($cur -and $cur -ne $url) { 
-        git remote remove $remoteName 2>&1 | Out-Null
+        git remote remove $remoteName 2>$null | Out-Null
         $cur = $null 
     }
     
     if (-not $cur) { 
         # Default to 'gamecake' if that's what user prefers, else 'origin'
         $remoteName = "gamecake"
-        git remote add $remoteName $url 
+        git remote add $remoteName $url 2>$null | Out-Null
     }
 
     # Get current branch name
-    $currentBranch = git rev-parse --abbrev-ref HEAD
+    $currentBranch = git rev-parse --abbrev-ref HEAD 2>$null
+    if (-not $currentBranch) { $currentBranch = "master" }
     
     Write-Host "Pushing $currentBranch to $remoteName ($url) ..." -ForegroundColor Cyan
+    
+    # Restore strict error action right before push so we can catch actual push failures
+    $ErrorActionPreference = $oldEAP
+    
     git push -u $remoteName $currentBranch 2>&1 | ForEach-Object { Write-Host "  $_" }
     if ($LASTEXITCODE -eq 0) {
         Write-Host ""
