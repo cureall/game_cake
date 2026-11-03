@@ -71,9 +71,7 @@ $headers = @{
 Write-Host "Checking remote repo..." -ForegroundColor Cyan
 try {
     $resp = Invoke-WebRequest -Uri "https://api.github.com/repos/$owner/$projectName" -Headers $headers -Method Get -UseBasicParsing -ErrorAction Stop -TimeoutSec 20 -Proxy 'http://192.168.31.199:7890'
-    Write-Host "repository exists." -ForegroundColor Yellow
-    Write-Host "Aborting. To reuse it manually:  cd '$projectRoot';  git remote add origin https://github.com/$owner/$projectName.git;  git push -u origin main"
-    exit 0
+    Write-Host "repository exists on GitHub." -ForegroundColor Yellow
 }
 catch {
     $sc = $_.Exception.Response.StatusCode.value__
@@ -82,17 +80,16 @@ catch {
         exit 1
     }
     Write-Host "Remote repo does not exist. Creating..." -ForegroundColor Cyan
-}
-
-# ---------- create private repo ----------
-$body = @{ name = $projectName; private = $true; auto_init = $false } | ConvertTo-Json -Compress
-try {
-    $null = Invoke-WebRequest -Uri 'https://api.github.com/user/repos' -Headers $headers -Method Post -Body $body -ContentType 'application/json' -UseBasicParsing -ErrorAction Stop -TimeoutSec 30 -Proxy 'http://192.168.31.199:7890'
-    Write-Host "Created private repo: https://github.com/$owner/$projectName" -ForegroundColor Green
-}
-catch {
-    Write-Host "FATAL: create repo failed: $($_.Exception.Message)" -ForegroundColor Red
-    exit 1
+    # ---------- create private repo ----------
+    $body = @{ name = $projectName; private = $true; auto_init = $false } | ConvertTo-Json -Compress
+    try {
+        $null = Invoke-WebRequest -Uri 'https://api.github.com/user/repos' -Headers $headers -Method Post -Body $body -ContentType 'application/json' -UseBasicParsing -ErrorAction Stop -TimeoutSec 30 -Proxy 'http://192.168.31.199:7890'
+        Write-Host "Created private repo: https://github.com/$owner/$projectName" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "FATAL: create repo failed: $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
 }
 
 # ---------- apply .gitignore (conservative, idempotent) ----------
@@ -150,25 +147,58 @@ try {
         git init --quiet
         Write-Host "git: initialized" -ForegroundColor Green
     }
-    git add -A 2>&1 | Out-Null
+    
+    # Git warnings (like LF/CRLF) are sent to stderr, which triggers Stop in PowerShell.
+    # We temporarily relax ErrorAction to avoid aborting on harmless warnings.
+    $oldEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    
+    git add -A 2>$null
+    
     $cnt = 0
     [int]::TryParse((git rev-list --count HEAD 2>$null), [ref]$cnt) | Out-Null
     if ($cnt -eq 0) {
-        git commit -m 'initial commit' --quiet 2>&1 | ForEach-Object { Write-Host "  commit: $_" }
+        git commit -m 'initial commit' --quiet 2>$null
+        Write-Host "git: initial commit created" -ForegroundColor Green
     } else {
-        # commit any pending changes introduced by the new gitignore
         $pending = git status --porcelain
-        if ($pending) { git commit -m 'chore: apply gitignore' --quiet 2>&1 | Out-Null }
+        if ($pending) { 
+            git commit -m 'chore: apply gitignore' --quiet 2>$null
+            Write-Host "git: committed changes" -ForegroundColor Green
+        }
     }
-    git branch -M main 2>&1 | Out-Null
-
+    
+    $ErrorActionPreference = $oldEAP
+    
+    git branch -M master 2>$null | Out-Null
+    
     # ---------- origin + push ----------
     $url = "https://github.com/$owner/$projectName.git"
+    
+    # Check for both 'origin' and 'gamecake'
+    $remoteName = "origin"
     $cur = git remote get-url origin 2>$null
-    if ($cur -and $cur -ne $url) { git remote remove origin 2>&1 | Out-Null; $cur = $null }
-    if (-not $cur) { git remote add origin $url }
-    Write-Host "Pushing to $url ..." -ForegroundColor Cyan
-    git push -u origin main 2>&1 | ForEach-Object { Write-Host "  $_" }
+    if (-not $cur) {
+        $cur = git remote get-url gamecake 2>$null
+        if ($cur) { $remoteName = "gamecake" }
+    }
+
+    if ($cur -and $cur -ne $url) { 
+        git remote remove $remoteName 2>&1 | Out-Null
+        $cur = $null 
+    }
+    
+    if (-not $cur) { 
+        # Default to 'gamecake' if that's what user prefers, else 'origin'
+        $remoteName = "gamecake"
+        git remote add $remoteName $url 
+    }
+
+    # Get current branch name
+    $currentBranch = git rev-parse --abbrev-ref HEAD
+    
+    Write-Host "Pushing $currentBranch to $remoteName ($url) ..." -ForegroundColor Cyan
+    git push -u $remoteName $currentBranch 2>&1 | ForEach-Object { Write-Host "  $_" }
     if ($LASTEXITCODE -eq 0) {
         Write-Host ""
         Write-Host "DONE. https://github.com/$owner/$projectName" -ForegroundColor Green
