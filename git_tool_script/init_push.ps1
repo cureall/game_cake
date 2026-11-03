@@ -198,10 +198,16 @@ try {
     
     Write-Host "Pushing $currentBranch to $remoteName ($url) ..." -ForegroundColor Cyan
     
-    # Restore strict error action right before push so we can catch actual push failures
-    $ErrorActionPreference = $oldEAP
+    # Do NOT restore strict ErrorActionPreference yet, because git push writes normal 
+    # progress info (like "To https://github.com/...") to stderr, which PowerShell
+    # intercepts as a fatal error if ErrorActionPreference is 'Stop'.
+    # We will rely on $LASTEXITCODE to determine if the push actually failed.
     
     git push -u $remoteName $currentBranch 2>&1 | ForEach-Object { Write-Host "  $_" }
+    
+    # Now it is safe to restore ErrorActionPreference
+    $ErrorActionPreference = $oldEAP
+    
     if ($LASTEXITCODE -eq 0) {
         Write-Host ""
         Write-Host "DONE. https://github.com/$owner/$projectName" -ForegroundColor Green
