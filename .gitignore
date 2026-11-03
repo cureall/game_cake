@@ -181,6 +181,8 @@ config.*
 !config.js
 !*.example.json
 
+raw/
+
 # IDE / local tool state
 .trae/
 .claude/

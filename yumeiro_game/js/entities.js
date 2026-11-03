@@ -119,10 +119,11 @@
   function Metronome() {
     this.interval = 60 / C.BEAT.BPM;
     this.t = 0;
+    this.rate = 1;   // 阶段 2 牛奶糖缓速：节拍时间流速（1 正常 / 0.6 缓速），由主循环每帧写入
   }
 
   Metronome.prototype.reset = function () { this.t = 0; };
-  Metronome.prototype.update = function (dt) { this.t += dt; };
+  Metronome.prototype.update = function (dt) { this.t += dt * this.rate; };
   Metronome.prototype.beatPhase = function () { return this.t / this.interval; };
   Metronome.prototype.nearestIndex = function () { return Math.round(this.beatPhase()); };
   /** 距最近拍点的时间差（秒） */
