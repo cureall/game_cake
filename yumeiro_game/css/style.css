@@ -1,0 +1,56 @@
+/* ============================================================
+   梦色蛋糕师 —— 跨端视口适配（阶段 0）
+   固定虚拟画布 750 x 1334（竖屏 9:16）：
+   - 移动端竖屏：画布 100vw/100vh 填满
+   - PC 宽屏：   手机画幅居中（Pillarboxing，两侧留深色边）
+   - 极窄高窗：  上下留边（Letterboxing）
+   ============================================================ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;            /* 禁止页面滚动条 */
+  overscroll-behavior: none;   /* 禁止移动端下拉回弹 / 上拉刷新 */
+  background: #2b1d2e;         /* Letterboxing 留边色（深莓紫，衬托粉色画布） */
+  touch-action: none;          /* 关键：禁用浏览器手势（双指缩放/双击放大/滑动） */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent; /* 去除移动端点击高亮 */
+}
+
+#game-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;     /* 画布居中 */
+}
+
+/*
+ * 等比缩放：取“视口内能容纳的最大 750:1334 等比尺寸”。
+ * 宽高两个 min() 互相约束，天然锁定纵横比，无需 JS 参与布局。
+ */
+#game-canvas {
+  display: block;
+  aspect-ratio: 750 / 1334;    /* 双保险：冗余锁定纵横比 */
+  width: min(100vw, calc(100vh * 750 / 1334));
+  height: min(100vh, calc(100vw * 1334 / 750));
+  background: #fff6f9;         /* 画布底色（奶油粉白） */
+  touch-action: none;          /* 手势兜底：Canvas 元素级再声明一次 */
+  cursor: pointer;
+}
+
+/* 移动端浏览器地址栏收展会引起 100vh 抖动：优先使用动态视口单位 dvh/dvw */
+@supports (width: 1dvh) {
+  #game-canvas {
+    width: min(100dvw, calc(100dvh * 750 / 1334));
+    height: min(100dvh, calc(100dvw * 1334 / 750));
+  }
+}

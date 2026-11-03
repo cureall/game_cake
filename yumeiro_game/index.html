@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <!-- 禁止双击/双指缩放，viewport-fit=cover 适配 iPhone 刘海屏安全区 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>梦色蛋糕师 · 甜点工坊</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- 视口容器：负责 Letterboxing / Pillarboxing 居中 -->
+  <div id="game-container">
+    <canvas id="game-canvas" width="750" height="1334"></canvas>
+  </div>
+  <!-- 纯静态、双击 index.html 即可运行：使用经典脚本标签而非 ES Module，规避 file:// 协议跨域限制 -->
+  <!-- 依赖顺序：utils → config → entities → main -->
+  <script src="js/utils.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/entities.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
