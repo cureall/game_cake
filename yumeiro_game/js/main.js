@@ -63,8 +63,118 @@
     Game.score = { bake: 0, flowers: 0, perfects: 0, fruits: 0, even: 0, total: 0 };
   }
 
+  /* ================= 甜点精灵与牛奶糖缓速（阶段 2） ================= */
+
+  E.preloadSpirits();
+  var spirits = {
+    vanilla: new E.Spirit('vanilla', C.SPIRIT.POS.vanilla.x, C.SPIRIT.POS.vanilla.y, C.SPIRIT.POS.vanilla.size),
+    chocolat: new E.Spirit('chocolat', C.SPIRIT.POS.chocolat.x, C.SPIRIT.POS.chocolat.y, C.SPIRIT.POS.chocolat.size),
+    caramel: new E.Spirit('caramel', C.SPIRIT.POS.caramel.x, C.SPIRIT.POS.caramel.y, C.SPIRIT.POS.caramel.size)
+  };
+
+  function updateSpirits(dt) {
+    spirits.vanilla.update(dt);
+    spirits.chocolat.update(dt);
+    spirits.caramel.update(dt);
+  }
+
+  function restoreSpiritPos() {
+    spirits.vanilla.setPos(C.SPIRIT.POS.vanilla);
+    spirits.chocolat.setPos(C.SPIRIT.POS.chocolat);
+    spirits.caramel.setPos(C.SPIRIT.POS.caramel);
+  }
+
+  /** 在场精灵渲染（画在场景内容之上、FX 粒子之下）；牛奶糖缓速中附带剩余时长光环 */
+  function renderSpirits(ctx, keys) {
+    for (var i = 0; i < keys.length; i++) {
+      var s = spirits[keys[i]];
+      if (!s) continue;
+      if (keys[i] === 'caramel' && slowmo.active) {
+        ctx.save();
+        ctx.globalAlpha = 0.55 + 0.25 * Math.sin(performance.now() * 0.006);
+        ctx.strokeStyle = '#7fd4cb';
+        ctx.lineWidth = 7;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, C.SPIRIT.CARAMEL_R - 6, -Math.PI / 2,
+          -Math.PI / 2 + TAU * (1 - slowmo.t / slowmo.dur));
+        ctx.stroke();
+        ctx.restore();
+      }
+      s.render(ctx);
+    }
+  }
+
+  /* ---- 牛奶糖缓速魔法（project.md 三.1）----
+   * 点击牛奶糖：蛋糕转盘 ω 与节拍流速平滑降低 40%（BGM 阶段 4 接入后同步变速），
+   * 持续一个循环 = 当前阶段正常转速转一圈的时长（夹 5~10s）；跨阶段自动终止。 */
+  var slowmo = { active: false, t: 0, dur: 0 };
+
+  function baseOmega() {
+    if (Game.name === 'PIPE_RHYTHM')
+      return TAU / (C.BEAT.FLOWERS_PER_CIRCLE * (60 / C.BEAT.BPM));
+    if (Game.name === 'TOPPING_DROP') return TAU / C.TOPPING.SPIN_PERIOD;
+    if (Game.name === 'EVALUATION') return 0.35;   // 3D 失败回退 2D 的缓转
+    return 0;
+  }
+
+  function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  function triggerSlowmo() {
+    if (slowmo.active) {
+      spirits.caramel.bounce();
+      Game.fx.text(spirits.caramel.x, spirits.caramel.y - 110, '魔法进行中♪', '#4db6ac', 28);
+      return;
+    }
+    slowmo.active = true;
+    slowmo.t = 0;
+    slowmo.dur = Utils.clamp(TAU / baseOmega(), C.SPIRIT.SLOW.MIN_DURATION, C.SPIRIT.SLOW.MAX_DURATION);
+    spirits.caramel.bounce();
+    spirits.caramel.say(pick(C.SPIRIT.CARAMEL.SLOW));
+    log('牛奶糖缓速魔法：' + slowmo.dur.toFixed(1) + 's（转速×' + (1 - C.SPIRIT.SLOW.REDUCE) + '）');
+  }
+
+  function updateSlowmo(dt) {
+    if (!slowmo.active) { Game.metronome.rate = 1; return; }
+    slowmo.t += dt;
+    if (slowmo.t >= slowmo.dur) {
+      slowmo.active = false;
+      Game.metronome.rate = 1;
+      log('缓速魔法结束，转速恢复');
+      return;
+    }
+    Game.metronome.rate = 1 - C.SPIRIT.SLOW.REDUCE;
+  }
+
+  /** 牛奶糖按钮命中检测（裱花/顶料阶段 onDown 优先于玩法点击） */
+  function hitCaramel(p) {
+    var dx = p.x - spirits.caramel.x, dy = p.y - spirits.caramel.y;
+    return dx * dx + dy * dy <= C.SPIRIT.CARAMEL_R * C.SPIRIT.CARAMEL_R;
+  }
+
+  /** 香草挥棒撒金粉：兜底触发的统一视觉（project.md 三.1 香草"撒金粉"粒子） */
+  function vanillaRescue(wordPool) {
+    spirits.vanilla.bounce();
+    if (wordPool) spirits.vanilla.say(pick(wordPool));
+    Game.fx.burst(spirits.vanilla.x, spirits.vanilla.y, {
+      count: 12, colors: ['#ffd700', '#ffe6a1', '#ffb6c1'], speed: 240, shape: 'circle'
+    });
+  }
+
+  /** 缓速中：屏幕四周柔和青色光晕，暗示时间流速变慢 */
+  function renderSlowmoVeil(ctx) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(140, 205, 200, 0.30)';
+    ctx.lineWidth = 26;
+    ctx.strokeRect(13, 13, 750 - 26, 1334 - 26);
+    ctx.strokeStyle = 'rgba(140, 205, 200, 0.15)';
+    ctx.lineWidth = 58;
+    ctx.strokeRect(29, 29, 750 - 58, 1334 - 58);
+    ctx.restore();
+  }
+
   function setState(name) {
     if (Game.cur && Game.cur.exit) Game.cur.exit();
+    slowmo.active = false;   // 缓速魔法不跨阶段延续（project.md：持续一个循环）
     Game.name = name;
     Game.cur = States[name];
     Game.t = 0;
@@ -180,6 +290,7 @@
       Game.order = C.ORDERS[Game.orderIndex % C.ORDERS.length];
       var line = C.GUEST.HELLO[Math.floor(Math.random() * C.GUEST.HELLO.length)];
       this.line = line.replace('{cake}', Game.order.name);
+      spirits.vanilla.say(C.SPIRIT.VANILLA.HELLO);
       showBanner('新订单♪', Game.order.name, 1.2);
     },
     update: function (dt) { Game.guest.update(dt); },
@@ -199,6 +310,7 @@
       ctx.fillText('“' + Game.order.desc + '”', 375, 756);
       ctx.restore();
       drawHint(ctx, '点击屏幕开始制作 ♪', 900);
+      renderSpirits(ctx, ['vanilla']);
     },
     onDown: function () { setState('BAKE_CHARGE'); }
   };
@@ -210,6 +322,7 @@
   var BAKE_CHARGE = {
     phase: 'charge',   // charge → fly → settle
     bar: null, vy: 0, y: 0, landT: 0, settleT: 0, bakePts: 0,
+    goldenSaid: false,
 
     enter: function () {
       resetScore();
@@ -217,6 +330,7 @@
       this.bar = new E.ChargeBar(LAYOUT.barX, LAYOUT.barY, LAYOUT.barW, LAYOUT.barH);
       this.phase = 'charge';
       this.vy = 0; this.y = 0; this.landT = 0; this.settleT = 0;
+      this.goldenSaid = false;
       showBanner('Step 2 · 烤胚', '长按屏幕蓄力，松手落盘！', 1.4);
     },
 
@@ -226,6 +340,18 @@
       if (this.phase === 'charge') {
         // 蓄力时蛋糕胚实时长高（手感反馈）
         Game.cake.height = Utils.lerp(cfg.MIN_HEIGHT, cfg.MAX_HEIGHT, this.bar.power);
+        // 巧克力辅助线（project.md 三.1）：长按首次进入黄金区间 →
+        // 点头发光 + 台词 + "Perfect 时机"提示，每次蓄力只提示一次
+        if (!this.goldenSaid && this.bar.holding) {
+          var p = this.bar.power;
+          if (p >= cfg.GOLDEN_MIN && p <= cfg.GOLDEN_MAX) {
+            this.goldenSaid = true;
+            spirits.chocolat.nod();
+            spirits.chocolat.say(pick(C.SPIRIT.CHOCOLAT.GOLDEN));
+            Game.fx.text(375, 330, 'Perfect 时机！', '#e8a20c', 44);
+            log('巧克力辅助：进入黄金区间 power=' + p.toFixed(2));
+          }
+        }
       } else if (this.phase === 'fly') {
         // 上抛 + 重力下落
         this.y += this.vy * dt;
@@ -255,10 +381,16 @@
       var golden = p >= C.CHARGE.GOLDEN_MIN && p <= C.CHARGE.GOLDEN_MAX;
       if (golden) {
         this.bakePts += C.SCORE.GOLDEN_BONUS;
+        spirits.chocolat.nod();
+        spirits.chocolat.say(pick(C.SPIRIT.CHOCOLAT.PRAISE));
         Game.fx.text(LAYOUT.plateX, LAYOUT.plateY - Game.cake.height - 80, '黄金火候 +' + C.SCORE.GOLDEN_BONUS, '#e8a20c', 44);
+      } else {
+        // 香草兜底（project.md 三.1）：火候偏小 / 过猛都不惩罚，
+        // 香草挥棒撒金粉，把结果改写成可爱（评分照常保底加分）
+        vanillaRescue(p < C.CHARGE.GOLDEN_MIN ? C.SPIRIT.VANILLA.SMALL : C.SPIRIT.VANILLA.CHEER);
       }
       Game.score.bake = this.bakePts;
-      log('烤胚落地：power=' + p.toFixed(2) + (golden ? '（黄金区间）' : '') + ' → +' + this.bakePts + ' 分');
+      log('烤胚落地：power=' + p.toFixed(2) + (golden ? '（黄金区间）' : '（香草兜底）') + ' → +' + this.bakePts + ' 分');
       Game.fx.burst(LAYOUT.plateX, LAYOUT.plateY - 10, { count: 14, colors: ['#ffd3e2', '#ff8fb5', '#fff'], speed: 260 });
       Game.fx.text(LAYOUT.plateX, LAYOUT.plateY - Game.cake.height - 30, '松软出炉♪', '#e2557e', 40);
     },
@@ -318,6 +450,7 @@
       ctx.restore();
 
       if (this.phase === 'charge') drawHint(ctx, '长按屏幕蓄力 · 松手落盘');
+      renderSpirits(ctx, ['vanilla', 'chocolat']);
     }
   };
 
@@ -328,7 +461,7 @@
    * ================================================================ */
 
   var PIPE_RHYTHM = {
-    placedSet: null, placedCount: 0, doneAt: -1,
+    placedSet: null, placedCount: 0, doneAt: -1, vanillaSaid: 0,
 
     enter: function () {
       Game.metronome.reset();
@@ -336,6 +469,7 @@
       this.placedSet = {};
       this.placedCount = 0;
       this.doneAt = -1;
+      this.vanillaSaid = 0;   // 香草兜底台词限流：一阶段最多说 2 次，避免刷屏
       showBanner('Step 3 · 裱花', '跟着♪节拍点满 ' + C.BEAT.TOTAL_BEATS + ' 朵奶油花！', 1.5);
     },
 
@@ -351,7 +485,9 @@
       }
     },
 
-    onDown: function () {
+    onDown: function (p) {
+      // 牛奶糖缓速按钮优先判定（点击头像不挤奶油）
+      if (hitCaramel(p)) { triggerSlowmo(); return; }
       var m = Game.metronome;
       var raw = m.nearestIndex();
       // 拍位按总拍数取模：下一圈（乃至第 N 圈）转到同一位置即可补救这一拍
@@ -366,7 +502,7 @@
       this.placedCount++;
       if (raw >= C.BEAT.TOTAL_BEATS) log('跨圈补救：第 ' + (Math.floor(raw / C.BEAT.FLOWERS_PER_CIRCLE) + 1) + ' 圈补上拍 #' + idx);
 
-      // 判定分级（阶段 2 香草将把负面判定统一改写为 Cute）
+      // 判定分级：点歪不改失败 —— 香草强制挥棒，把一切偏差兜底改写为 Cute（project.md 三.1）
       var d = m.distToNearest();
       var tier = d <= C.BEAT.WINDOW_PERFECT ? 'perfect' : d <= C.BEAT.WINDOW_GOOD ? 'good' : 'cute';
       Game.cake.flowers.push({ a: TAU - (Game.turntable.angle % TAU), tier: tier });
@@ -384,6 +520,8 @@
         Game.fx.burst(nx, ny, { count: 9, colors: ['#ff8fb5', '#ffd3e2'], speed: 230 });
         Game.fx.text(nx, ny - 40, 'Good!', '#e2557e', 40);
       } else {
+        // Cute 不是失败：香草挥棒撒金粉 + 台词鼓励（台词限流），转盘上的花照常绽放
+        vanillaRescue(this.vanillaSaid < 2 ? (this.vanillaSaid++, C.SPIRIT.VANILLA.CHEER) : null);
         Game.fx.burst(nx, ny, { count: 6, colors: ['#c9a7d6', '#ecd9f2'], speed: 180, shape: 'circle' });
         Game.fx.text(nx, ny - 40, 'Cute~', '#a06fb5', 38);
       }
@@ -457,6 +595,7 @@
       }
 
       drawHint(ctx, '点击屏幕任意位置挤出奶油花');
+      renderSpirits(ctx, ['vanilla', 'caramel']);
     }
   };
 
@@ -515,6 +654,8 @@
     },
 
     onDown: function (p) {
+      // 牛奶糖缓速按钮优先判定（转盘太快时可先点她减速再瞄准）
+      if (hitCaramel(p)) { triggerSlowmo(); return; }
       var f = this.queue[this.idx];
       if (!f || f.state !== 'float') {
         log('顶料点击忽略：#' + this.idx + ' 状态=' + (f ? f.state : '队列已空'));
@@ -562,6 +703,7 @@
       }
 
       drawHint(ctx, '点一点，把顶料撒到蛋糕上');
+      renderSpirits(ctx, ['vanilla', 'caramel']);
     }
   };
 
@@ -588,10 +730,21 @@
       this.startShowcase();
       showBanner('完成♪', '客人超级满意！', 1.4);
       Game.fx.burst(375, 480, { count: 24, colors: ['#ffc94d', '#ff8fb5', '#b8e6ff', '#fff'], speed: 420 });
+      // 三精灵共同大赞（project.md 三.2：结算时客人与精灵共同大赞）：
+      // 挪到结算位排排站，延迟依次弹跳；香草代表发言
+      var EV = C.SPIRIT.POS.EVAL;
+      spirits.vanilla.setPos(EV.vanilla);
+      spirits.chocolat.setPos(EV.chocolat);
+      spirits.caramel.setPos(EV.caramel);
+      spirits.vanilla.bounce(0.10);
+      spirits.chocolat.bounce(0.35);
+      spirits.caramel.bounce(0.60);
+      spirits.vanilla.say(C.SPIRIT.VANILLA.DONE);
     },
 
     exit: function () {
       this.destroyShowcase();   // 离开 Step 4：彻底释放 WebGL 资源
+      restoreSpiritPos();       // 精灵回到常驻位
     },
 
     /* ---- 3D 展台接入（new.md 任务 3）----
@@ -919,6 +1072,8 @@
         ctx.fillText('一块！', 0, 32);
         ctx.restore();
       }
+
+      renderSpirits(ctx, ['vanilla', 'chocolat', 'caramel']);
     }
   };
 
@@ -963,6 +1118,12 @@
       if (Game.cur.update) Game.cur.update(dt);
       Game.fx.update(dt);
       updateBanner(dt);
+      updateSpirits(dt);
+      updateSlowmo(dt);
+      // 转盘目标转速统一在此驱动（缓速 ×0.6 平滑趋近由 Turntable.update 内建 lerp 实现）；
+      // 各状态 enter 里的 syncToBeat / target 赋值仅作首帧兜底
+      var factor = slowmo.active ? 1 - C.SPIRIT.SLOW.REDUCE : 1;
+      Game.turntable.target = baseOmega() * factor;
       Game.turntable.update(dt);
     }
 
@@ -974,6 +1135,7 @@
     if (Game.cur && Game.cur.render) Game.cur.render(ctx, now);
     Game.fx.render(ctx);
     renderBanner(ctx);
+    if (slowmo.active) renderSlowmoVeil(ctx);
 
     // 常驻探针（沿用阶段 0）
     ctx.save();

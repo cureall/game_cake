@@ -100,6 +100,18 @@
     var gh = h * (C.CHARGE.GOLDEN_MAX - C.CHARGE.GOLDEN_MIN);
     ctx.fillStyle = 'rgba(255, 214, 120, 0.55)';
     ctx.fillRect(x + 3, gy, w - 6, gh);
+    // 巧克力磁吸高亮：蓄力中且当前值处于黄金区间 → 双层描边光晕脉冲
+    if (this.holding && this.power >= C.CHARGE.GOLDEN_MIN && this.power <= C.CHARGE.GOLDEN_MAX) {
+      var pulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.012);
+      ctx.strokeStyle = 'rgba(255, 190, 60, ' + (0.30 + 0.28 * pulse).toFixed(3) + ')';
+      ctx.lineWidth = 8 + 5 * pulse;
+      roundRect(ctx, x + 2, gy - 5, w - 4, gh + 10, w / 2);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255, 242, 200, ' + (0.65 + 0.35 * pulse).toFixed(3) + ')';
+      ctx.lineWidth = 3;
+      roundRect(ctx, x + 3, gy, w - 6, gh, w / 2);
+      ctx.stroke();
+    }
 
     // 填充柱
     var fh = h * U.clamp(this.display, 0, 1);
@@ -580,6 +592,211 @@
     }
   };
 
+  /* ================= 甜点精灵（阶段 2：弱惩罚容错介入） =================
+   * 素材为 assets/fairy_*.png 透明底立绘；加载失败、或画布会被污染
+   * （file:// 直开时 drawImage 本地图片 → toDataURL 抛 SecurityError，
+   * "保存成果"功能失效）时自动退回 Canvas 简笔形象，双击 index.html 一切功能照常。 */
+
+  var SPIRIT_IMGS = {};
+
+  function preloadSpirits() {
+    var defs = [
+      ['vanilla', 'assets/fairy_vanilla.png'],
+      ['chocolat', 'assets/fairy_chocolat.png'],
+      ['caramel', 'assets/fairy_caramel.png']
+    ];
+    for (var i = 0; i < defs.length; i++) {
+      (function (key, src) {
+        var img = new Image();
+        img.onload = function () {
+          try {
+            var probe = document.createElement('canvas');
+            probe.width = probe.height = 2;
+            var pc = probe.getContext('2d');
+            pc.drawImage(img, 0, 0);
+            pc.getImageData(0, 0, 1, 1);   // 画布被污染时在此抛 SecurityError
+            SPIRIT_IMGS[key] = img;
+          } catch (e) { /* file:// 等场景：弃用 PNG，保持简笔兜底 */ }
+        };
+        img.src = src;   // onerror 同样静默：兜底形象始终可用
+      })(defs[i][0], defs[i][1]);
+    }
+  }
+
+  /** 精灵实体：常驻 sin 浮动 + 机制触发的弹跳 / 说话 / 点头
+   *  三个临时状态均为 >=0 计时，超时自动归位 -1。 */
+  function Spirit(key, x, y, size) {
+    this.key = key;            // 'vanilla' | 'chocolat' | 'caramel'
+    this.x = x; this.y = y;    // 常驻锚点（虚拟坐标）
+    this.size = size;          // 显示高度 px
+    this.t = Math.random() * 10;
+    this.bounceT = -1;         // 弹跳（放大回弹 0.55s，负值 = 延迟出发）
+    this.talkT = -1;           // 说话（头顶气泡 2.2s）
+    this.talkText = '';
+    this.nodT = -1;            // 点头 + 发光（巧克力黄金区，1.2s）
+  }
+
+  Spirit.prototype.setPos = function (p) {
+    this.x = p.x; this.y = p.y;
+    if (p.size) this.size = p.size;
+  };
+
+  Spirit.prototype.bounce = function (delay) { this.bounceT = -(delay || 0); };
+  Spirit.prototype.say = function (text) { this.talkT = 0; this.talkText = text; };
+  Spirit.prototype.nod = function () { this.nodT = 0; };
+
+  Spirit.prototype.update = function (dt) {
+    this.t += dt;
+    if (this.bounceT > -1) {   // -1 为归位值；延迟中的负值也要持续累加
+      this.bounceT += dt;
+      if (this.bounceT > 0.55) this.bounceT = -1;
+    }
+    if (this.talkT >= 0) {
+      this.talkT += dt;
+      if (this.talkT > 2.2) this.talkT = -1;
+    }
+    if (this.nodT >= 0) {
+      this.nodT += dt;
+      if (this.nodT > 1.2) this.nodT = -1;
+    }
+  };
+
+  Spirit.prototype.render = function (ctx) {
+    var bob = Math.sin(this.t * 1.7) * 7;   // 待机正弦漂浮
+    var scale = 1, nod = 0;
+
+    // 点头发光光环（巧克力：黄金火候点亮）
+    if (this.nodT > 0) {
+      var glow = 0.5 * Math.max(0, 1 - this.nodT / 1.2);
+      ctx.save();
+      ctx.globalAlpha = glow;
+      for (var g = 3; g >= 1; g--) {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y + bob, this.size * (0.55 + g * 0.1), 0, TAU);
+        ctx.fillStyle = '#ffe6a1';
+        ctx.fill();
+      }
+      ctx.restore();
+      nod = Math.sin(this.nodT * 10) * 0.14;
+    }
+    if (this.bounceT > 0) {
+      var k = Math.min(this.bounceT / 0.55, 1);
+      scale = 1 + 0.38 * Math.sin(k * Math.PI);
+    }
+
+    ctx.save();
+    ctx.translate(this.x, this.y + bob);
+    ctx.rotate(nod);
+    ctx.scale(scale, scale);
+    var img = SPIRIT_IMGS[this.key];
+    if (img) {
+      var w = this.size * img.width / img.height;
+      ctx.drawImage(img, -w / 2, -this.size / 2, w, this.size);
+    } else {
+      drawSpiritFace(ctx, this.key, this.size);
+    }
+    ctx.restore();
+
+    // 头顶台词气泡（末端 0.3s 淡出；左右夹逼防出屏）
+    if (this.talkT >= 0) {
+      ctx.save();
+      ctx.globalAlpha = U.clamp((2.2 - this.talkT) / 0.3, 0, 1);
+      drawBubble(ctx, U.clamp(this.x, 190, 560), this.y - this.size / 2 - 92 + bob, this.talkText, 22);
+      ctx.restore();
+    }
+  };
+
+  /* ---- Canvas 简笔兜底形象（project.md 三.1 的极简抽象技巧） ---- */
+
+  function faceCommon(ctx, r, skin) {
+    ctx.fillStyle = skin;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,140,170,0.45)';
+    ctx.beginPath();
+    ctx.ellipse(-r * 0.62, r * 0.38, r * 0.2, r * 0.13, 0, 0, TAU);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(r * 0.62, r * 0.38, r * 0.2, r * 0.13, 0, 0, TAU);
+    ctx.fill();
+  }
+
+  function drawSpiritFace(ctx, key, h) {
+    var r = h * 0.22;
+    ctx.save();
+    ctx.lineCap = 'round';
+    if (key === 'vanilla') {
+      // 金色双马尾小球 + 白色高筒帽 + 红草莓徽章
+      ctx.fillStyle = '#f7d358';
+      ctx.beginPath(); ctx.arc(-r * 1.5, -r * 0.1, r * 0.62, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(r * 1.5, -r * 0.1, r * 0.62, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#fffdf9';
+      roundRect(ctx, -r * 0.72, -r * 2.35, r * 1.44, r * 1.1, r * 0.3);
+      ctx.fill();
+      ctx.beginPath(); ctx.ellipse(0, -r * 2.3, r * 0.72, r * 0.34, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#e60039';
+      ctx.beginPath(); ctx.arc(0, -r * 1.95, r * 0.16, 0, TAU); ctx.fill();
+      faceCommon(ctx, r, '#ffe4d4');
+      // 元气眯眼 + 张嘴笑
+      ctx.strokeStyle = '#5c4033'; ctx.lineWidth = r * 0.09;
+      ctx.beginPath(); ctx.arc(-r * 0.38, -r * 0.05, r * 0.2, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+      ctx.beginPath(); ctx.arc(r * 0.38, -r * 0.05, r * 0.2, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, r * 0.32, r * 0.22, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke();
+    } else if (key === 'chocolat') {
+      // 深棕双钻头卷（下宽三角）
+      ctx.fillStyle = '#3e2723';
+      ctx.beginPath();
+      ctx.moveTo(-r * 1.05, -r * 0.7); ctx.lineTo(-r * 2.0, r * 1.5); ctx.lineTo(-r * 0.8, r * 1.2);
+      ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(r * 1.05, -r * 0.7); ctx.lineTo(r * 2.0, r * 1.5); ctx.lineTo(r * 0.8, r * 1.2);
+      ctx.closePath(); ctx.fill();
+      // 深棕刘海 + 白帽
+      ctx.beginPath(); ctx.arc(0, -r * 0.42, r, Math.PI * 0.95, Math.PI * 2.05); ctx.fill();
+      ctx.fillStyle = '#fffdf9';
+      roundRect(ctx, -r * 0.66, -r * 2.25, r * 1.32, r * 1.0, r * 0.28);
+      ctx.fill();
+      faceCommon(ctx, r, '#f4dcc4');
+      // 傲娇吊眼 + 下撇扁嘴
+      ctx.strokeStyle = '#5c2e1e'; ctx.lineWidth = r * 0.09;
+      ctx.beginPath(); ctx.moveTo(-r * 0.55, -r * 0.12); ctx.lineTo(-r * 0.2, -r * 0.02); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(r * 0.55, -r * 0.12); ctx.lineTo(r * 0.2, -r * 0.02); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-r * 0.18, r * 0.42); ctx.lineTo(r * 0.18, r * 0.42); ctx.stroke();
+    } else {
+      // caramel：波波头 + 内卷发尾 + 呆毛 + 焦糖蝴蝶结
+      ctx.strokeStyle = '#c68642'; ctx.lineWidth = r * 0.12;
+      ctx.beginPath();
+      ctx.moveTo(0, -r * 1.25); ctx.quadraticCurveTo(r * 0.55, -r * 1.85, r * 0.15, -r * 2.25);
+      ctx.stroke();
+      ctx.fillStyle = '#c68642';
+      ctx.beginPath(); ctx.arc(0, -r * 0.35, r * 1.12, Math.PI, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(-r * 1.02, r * 0.3, r * 0.4, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(r * 1.02, r * 0.3, r * 0.4, 0, TAU); ctx.fill();
+      faceCommon(ctx, r, '#ffe9cf');
+      // 八字下垂眼（水绿瞳 + 高光）+ 小圆嘴
+      ctx.fillStyle = '#4a8f88';
+      ctx.beginPath(); ctx.ellipse(-r * 0.38, -r * 0.05, r * 0.13, r * 0.22, 0.15, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(r * 0.38, -r * 0.05, r * 0.13, r * 0.22, -0.15, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(-r * 0.42, -r * 0.13, r * 0.05, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(r * 0.34, -r * 0.13, r * 0.05, 0, TAU); ctx.fill();
+      ctx.strokeStyle = '#b57a52'; ctx.lineWidth = r * 0.08;
+      ctx.beginPath(); ctx.arc(0, r * 0.35, r * 0.14, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke();
+      // 领口焦糖大蝴蝶结（右下角示意）
+      ctx.fillStyle = '#8d5524';
+      ctx.beginPath();
+      ctx.moveTo(r * 0.55, r * 0.9); ctx.lineTo(r * 1.05, r * 0.62); ctx.lineTo(r * 1.05, r * 1.18);
+      ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(r * 0.55, r * 0.9); ctx.lineTo(r * 0.05, r * 0.62); ctx.lineTo(r * 0.05, r * 1.18);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#d49b5b';
+      ctx.beginPath(); ctx.arc(r * 0.55, r * 0.9, r * 0.14, 0, TAU); ctx.fill();
+    }
+    ctx.restore();
+  }
+
   /* ================= 导出 ================= */
 
   global.Entities = {
@@ -595,7 +812,9 @@
     Cake: Cake,
     Fruit: Fruit,
     Guest: Guest,
-    FX: FX
+    FX: FX,
+    Spirit: Spirit,
+    preloadSpirits: preloadSpirits
   };
 
 })(window);
