@@ -46,7 +46,7 @@
 
   /* ================= 蓄力条 ================= */
 
-  /* showGolden=false 供自由工坊使用：只看蓄力读数，无黄金区/磁吸提示 */
+  /* showGolden=false 供自由工坊使用：只看蓄力读数，无黄金区高亮 */
   function ChargeBar(x, y, w, h, showGolden) {
     this.x = x; this.y = y; this.w = w; this.h = h;
     this.showGolden = showGolden !== false;
@@ -97,13 +97,13 @@
     ctx.lineWidth = 3;
     ctx.stroke();
 
-    // 黄金释放区间（阶段 2 巧克力辅助线的基础；自由工坊隐藏）
+    // 黄金释放区间（黄色高亮带；自由工坊隐藏；补分吸附由精灵松手时静默完成）
     if (this.showGolden) {
       var gy = y + h * (1 - C.CHARGE.GOLDEN_MAX);
       var gh = h * (C.CHARGE.GOLDEN_MAX - C.CHARGE.GOLDEN_MIN);
       ctx.fillStyle = 'rgba(255, 214, 120, 0.55)';
       ctx.fillRect(x + 3, gy, w - 6, gh);
-      // 巧克力磁吸高亮：蓄力中且当前值处于黄金区间 → 双层描边光晕脉冲
+      // 蓄力中且当前值处于黄金区间 → 双层描边光晕脉冲
       if (this.holding && this.power >= C.CHARGE.GOLDEN_MIN && this.power <= C.CHARGE.GOLDEN_MAX) {
         var pulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.012);
         ctx.strokeStyle = 'rgba(255, 190, 60, ' + (0.30 + 0.28 * pulse).toFixed(3) + ')';
@@ -728,10 +728,14 @@
     ctx.restore();
 
     // 头顶台词气泡（末端 0.3s 淡出；左右夹逼防出屏）
+    // BUBBLE_ANCHOR 覆盖位：贴着力度条的精灵把气泡平移到空白区，避免遮挡力度条
     if (this.talkT >= 0) {
       ctx.save();
       ctx.globalAlpha = U.clamp((2.2 - this.talkT) / 0.3, 0, 1);
-      drawBubble(ctx, U.clamp(this.x, 190, 560), this.y - this.size / 2 - 92 + bob, this.talkText, 22);
+      var ba = C.SPIRIT.BUBBLE_ANCHOR && C.SPIRIT.BUBBLE_ANCHOR[this.key];
+      var bx = ba ? ba.x : U.clamp(this.x, 190, 560);
+      var by = ba ? ba.y + bob : this.y - this.size / 2 - 92 + bob;
+      drawBubble(ctx, bx, by, this.talkText, 22);
       ctx.restore();
     }
   };

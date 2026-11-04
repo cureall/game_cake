@@ -245,15 +245,6 @@
     return dx * dx + dy * dy <= C.SPIRIT.CARAMEL_R * C.SPIRIT.CARAMEL_R;
   }
 
-  /** 香草挥棒撒金粉：兜底触发的统一视觉（project.md 三.1 香草"撒金粉"粒子） */
-  function vanillaRescue(wordPool) {
-    spirits.vanilla.bounce();
-    if (wordPool) spirits.vanilla.say(pick(wordPool));
-    Game.fx.burst(spirits.vanilla.x, spirits.vanilla.y, {
-      count: 12, colors: ['#ffd700', '#ffe6a1', '#ffb6c1'], speed: 240, shape: 'circle'
-    });
-  }
-
   /** 缓速中：屏幕四周柔和青色光晕，暗示时间流速变慢 */
   function renderSlowmoVeil(ctx) {
     ctx.save();
@@ -265,6 +256,69 @@
     ctx.strokeRect(29, 29, 750 - 58, 1334 - 58);
     ctx.restore();
   }
+
+  /* ================= BGM：op ↔ ed 轮播 + 状态分区音量 =================
+   * 首次手势解锁自动播放后起播 op.wav，每首播完停 GAP 秒换另一首，
+   * 以此循环；制作阶段音量压低，封面/接单/结算平滑恢复正常。 */
+  var BGM = {
+    tracks: [], idx: 0, gapLeft: -1,   // gapLeft ≥ 0：曲目间隙倒计时中
+    live: false, vol: 0,
+    NORMAL_STATES: ['TITLE', 'ORDER_SHOW', 'EVALUATION', 'FREE_RESULT'],
+
+    init: function () {
+      var self = this;
+      ['op', 'ed'].forEach(function (name) {
+        var el = new Audio('assets/' + name + '.wav');
+        el.preload = 'auto';
+        el.addEventListener('ended', function () { self.gapLeft = C.BGM.GAP; });
+        self.tracks.push(el);
+      });
+      // 页面加载即尝试起播：浏览器允许自动播放时首页一打开就有音乐
+      this.kick();
+      // 被自动播放策略拦截时，页面任意首次手势（任意位置/按键）解锁重试
+      ['pointerdown', 'touchstart', 'mousedown', 'keydown'].forEach(function (ev) {
+        document.addEventListener(ev, function () { self.kick(); },
+          { passive: true, capture: true });
+      });
+    },
+
+    /** 幂等：已在播直接返回；play() 被拒置回 live=false 等下次手势 */
+    kick: function () {
+      if (this.live) return;
+      this.live = true;
+      this.playCurrent();
+    },
+
+    playCurrent: function () {
+      var el = this.tracks[this.idx];
+      el.volume = Utils.clamp(this.vol, 0, 1);
+      var self = this;
+      var pr = el.play();
+      if (pr && pr.then) {
+        pr.then(function () {
+          log('BGM ▶ ' + (self.idx === 0 ? 'op' : 'ed') + '.wav');
+        }, function () {
+          self.live = false;   // 被拦截：等下一次手势再试
+        });
+      }
+    },
+
+    update: function (dt) {
+      if (!this.live) return;
+      if (this.gapLeft >= 0) {
+        this.gapLeft -= dt;
+        if (this.gapLeft < 0) {
+          this.idx = (this.idx + 1) % this.tracks.length;   // op ↔ ed 轮播
+          this.playCurrent();
+        }
+      }
+      var target = this.NORMAL_STATES.indexOf(Game.name) >= 0
+        ? C.BGM.NORMAL_VOLUME : C.BGM.DUCK_VOLUME;
+      this.vol += (target - this.vol) * Math.min(1, dt * 3);   // 音量平滑过渡
+      this.tracks[this.idx].volume = Utils.clamp(this.vol, 0, 1);
+    }
+  };
+  BGM.init();
 
   function setState(name) {
     if (Game.cur && Game.cur.exit) Game.cur.exit();
@@ -444,9 +498,23 @@
 
   var TITLE = {
     btn: { x: 375, y: 1040, w: 500, h: 150 },
+    btnDiary: { x: 540, y: 100, w: 350, h: 80 },   // 右上角：草莓的日记本（阶段 4）
+    diaryCount: 0,   // 进封面时统计一次，避免 render 每帧读 localStorage
 
-    onDown: function () {
-      // 任意点击即开始（零门槛）；大按钮只是视觉引导
+    enter: function () {
+      this.diaryCount = loadDiary().length;
+    },
+
+    onDown: function (p) {
+      // 日记本入口优先判定：命中则翻相册，不开始游戏
+      var d = this.btnDiary;
+      if (p.x >= d.x - d.w / 2 && p.x <= d.x + d.w / 2 &&
+          p.y >= d.y - d.h / 2 && p.y <= d.y + d.h / 2) {
+        log('封面：打开草莓的日记本');
+        setState('DIARY');
+        return;
+      }
+      // 其余任意点击即开始（零门槛）；大按钮只是视觉引导
       log('封面：点击开始 → 第一单');
       setState('ORDER_SHOW');
     },
@@ -505,6 +573,23 @@
       ctx.fillText('♪ 开始制作蛋糕 ♪', 0, 0);
       ctx.restore();
 
+      // 右上角"日记本"入口（阶段 4：草莓的相册）
+      var d = this.btnDiary;
+      ctx.save();
+      ctx.translate(d.x, d.y);
+      roundRectPath(ctx, -d.w / 2, -d.h / 2, d.w, d.h, d.h / 2);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.82)';
+      ctx.fill();
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = '#f3a8c3';
+      ctx.stroke();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = 'bold 32px "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.fillStyle = '#e2557e';
+      ctx.fillText('📖 日记本' + (this.diaryCount > 0 ? ' ·' + this.diaryCount : ''), 0, 2);
+      ctx.restore();
+
       drawHint(ctx, '纯粹的自由烘焙时光', 1270);
     }
   };
@@ -550,7 +635,8 @@
   var BAKE_CHARGE = {
     phase: 'charge',   // charge → fly → settle
     bar: null, vy: 0, y: 0, landT: 0, settleT: 0, bakePts: 0,
-    goldenSaid: false,
+    power: 0,          // 松手瞬间的最终火候（含精灵吸附补正）
+    assisted: false,
 
     enter: function () {
       resetScore();
@@ -558,7 +644,7 @@
       this.bar = new E.ChargeBar(LAYOUT.barX, LAYOUT.barY, LAYOUT.barW, LAYOUT.barH);
       this.phase = 'charge';
       this.vy = 0; this.y = 0; this.landT = 0; this.settleT = 0;
-      this.goldenSaid = false;
+      this.power = 0; this.assisted = false;
       showBanner('Step 2 · 烤胚', '长按屏幕蓄力，松手落盘！', 1.4);
     },
 
@@ -568,18 +654,6 @@
       if (this.phase === 'charge') {
         // 蓄力时蛋糕胚实时长高（手感反馈）
         Game.cake.height = Utils.lerp(cfg.MIN_HEIGHT, cfg.MAX_HEIGHT, this.bar.power);
-        // 巧克力辅助线（project.md 三.1）：长按首次进入黄金区间 →
-        // 点头发光 + 台词 + "Perfect 时机"提示，每次蓄力只提示一次
-        if (!this.goldenSaid && this.bar.holding) {
-          var p = this.bar.power;
-          if (p >= cfg.GOLDEN_MIN && p <= cfg.GOLDEN_MAX) {
-            this.goldenSaid = true;
-            spirits.chocolat.nod();
-            spirits.chocolat.say(pick(C.SPIRIT.CHOCOLAT.GOLDEN));
-            Game.fx.text(375, 330, 'Perfect 时机！', '#e8a20c', 44);
-            log('巧克力辅助：进入黄金区间 power=' + p.toFixed(2));
-          }
-        }
       } else if (this.phase === 'fly') {
         // 上抛 + 重力下落
         this.y += this.vy * dt;
@@ -603,22 +677,21 @@
     },
 
     onLanded: function () {
-      // 计分：power 越高分越高；黄金区间额外奖励（只有加分）
-      var p = this.bar.power;
-      this.bakePts = C.SCORE.BAKE_BASE + Math.round(p * 70);
-      var golden = p >= C.CHARGE.GOLDEN_MIN && p <= C.CHARGE.GOLDEN_MAX;
-      if (golden) {
-        this.bakePts += C.SCORE.GOLDEN_BONUS;
+      // 计分：火候越高分越高；黄金区奖励必得（没踩准的部分
+      // 由巧克力精灵在松手瞬间静默吸附补正，只有加分、无惩罚）
+      var p = this.power;
+      this.bakePts = C.SCORE.BAKE_BASE + Math.round(p * 70) + C.SCORE.GOLDEN_BONUS;
+      if (this.assisted) {
+        spirits.chocolat.nod();
+        spirits.chocolat.say(pick(C.SPIRIT.CHOCOLAT.ASSIST));
+        Game.fx.text(LAYOUT.plateX, LAYOUT.plateY - Game.cake.height - 80, '巧克力补火候 +' + C.SCORE.GOLDEN_BONUS, '#e8a20c', 44);
+      } else {
         spirits.chocolat.nod();
         spirits.chocolat.say(pick(C.SPIRIT.CHOCOLAT.PRAISE));
         Game.fx.text(LAYOUT.plateX, LAYOUT.plateY - Game.cake.height - 80, '黄金火候 +' + C.SCORE.GOLDEN_BONUS, '#e8a20c', 44);
-      } else {
-        // 香草兜底（project.md 三.1）：火候偏小 / 过猛都不惩罚，
-        // 香草挥棒撒金粉，把结果改写成可爱（评分照常保底加分）
-        vanillaRescue(p < C.CHARGE.GOLDEN_MIN ? C.SPIRIT.VANILLA.SMALL : C.SPIRIT.VANILLA.CHEER);
       }
       Game.score.bake = this.bakePts;
-      log('烤胚落地：power=' + p.toFixed(2) + (golden ? '（黄金区间）' : '（香草兜底）') + ' → +' + this.bakePts + ' 分');
+      log('烤胚落地：power=' + p.toFixed(2) + (this.assisted ? '（精灵吸附补正）' : '（玩家精准）') + ' → +' + this.bakePts + ' 分');
       Game.fx.burst(LAYOUT.plateX, LAYOUT.plateY - 10, { count: 14, colors: ['#ffd3e2', '#ff8fb5', '#fff'], speed: 260 });
       Game.fx.text(LAYOUT.plateX, LAYOUT.plateY - Game.cake.height - 30, '松软出炉♪', '#e2557e', 40);
     },
@@ -629,6 +702,12 @@
     onUp: function () {
       if (this.phase !== 'charge' || !this.bar.holding) return;
       var p = this.bar.release();
+      // 巧克力精灵辅助（改版）：不画任何颜色提示，玩家没踩准黄金区时
+      // 悄悄把火候吸附到最近的黄金边界再起飞 —— 静默保底黄金加分
+      this.assisted = p < C.CHARGE.GOLDEN_MIN || p > C.CHARGE.GOLDEN_MAX;
+      if (p < C.CHARGE.GOLDEN_MIN) p = C.CHARGE.GOLDEN_MIN + 0.02;
+      else if (p > C.CHARGE.GOLDEN_MAX) p = C.CHARGE.GOLDEN_MAX - 0.02;
+      this.power = p;
       // 弹起再落回：跳一跳手感
       this.vy = 280 + 520 * p;
       this.y = 0;
@@ -1765,7 +1844,7 @@
         while (diary.length > C.FREE.DIARY_MAX) diary.shift();
         localStorage.setItem(C.FREE.DIARY_KEY, JSON.stringify(diary));
         this.saved = true;
-        showBanner('已收入日记相册♪', '草莓的日记本（阶段 4 开放翻看）', 1.8);
+        showBanner('已收入日记相册♪', '可以在封面的「日记本」里翻看♪', 1.8);
         log('日记相册：已保存第 ' + diary.length + ' 篇（' + this.title + '）');
       } catch (err) {
         showBanner('相册保存失败…', '浏览器存储可能已满', 1.8);
@@ -1842,10 +1921,254 @@
     }
   };
 
+  /* ================================================================
+   * 状态 8：STATE_DIARY —— 草莓的日记本（阶段 4：本地相册翻看）
+   * 从封面进入，网格翻看 localStorage 里的自由工坊大作缩略图；
+   * 点击缩略图放大（称号 + 日期），支持单删与清空；返回封面。
+   * ================================================================ */
+
+  function loadDiary() {
+    try {
+      var d = JSON.parse(localStorage.getItem(C.FREE.DIARY_KEY) || '[]');
+      return Array.isArray(d) ? d : [];
+    } catch (e) { return []; }   // 数据损坏视作空相册
+  }
+
+  function fmtDate(ts) {
+    var d = new Date(ts), p2 = function (n) { return (n < 10 ? '0' : '') + n; };
+    return d.getFullYear() + '.' + p2(d.getMonth() + 1) + '.' + p2(d.getDate()) +
+      ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+  }
+
+  var DIARY = {
+    list: null, imgs: null,      // 元数据数组 / Image 缓存（退出释放）
+    view: 'grid', detail: -1,    // grid | detail；detail 为当前索引
+    GRID: { x0: 79, y0: 250, size: 176, gap: 32, cols: 3 },   // 网格布局（3 列整体居中）
+    btnBack: { x: 375, y: 1250, w: 400, h: 92 },
+    btnDel: { x: 545, y: 1170, w: 250, h: 84 },      // 详情页：删除这一篇
+    btnDelOk: { x: 375, y: 1050, w: 320, h: 88 },    // 确认弹层：真的删
+    btnDelNo: { x: 375, y: 1150, w: 320, h: 88 },    // 确认弹层：先留着
+    confirmIdx: -1,              // 待确认删除的索引（-1 = 弹层关闭）
+
+    enter: function () {
+      this.list = loadDiary();
+      this.imgs = [];
+      for (var i = 0; i < this.list.length; i++) {
+        var img = new Image();
+        img.src = this.list[i].img;
+        this.imgs.push(img);   // dataURL 解码快，直接预载入
+      }
+      this.view = 'grid';
+      this.detail = -1;
+      this.confirmIdx = -1;
+      showBanner('草莓的日记本', this.list.length ? '共 ' + this.list.length + ' 篇大作' : '', 1.2);
+    },
+
+    exit: function () {
+      this.list = null;   // 释放 Image 引用，交给 GC
+      this.imgs = null;
+    },
+
+    persist: function () {
+      localStorage.setItem(C.FREE.DIARY_KEY, JSON.stringify(this.list));
+      // 删光最后一篇时连键一起移除，保持存储干净
+      if (!this.list.length) localStorage.removeItem(C.FREE.DIARY_KEY);
+    },
+
+    removeAt: function (idx) {
+      this.list.splice(idx, 1);
+      this.imgs.splice(idx, 1);
+      this.persist();
+      this.confirmIdx = -1;
+      if (this.detail >= this.list.length) this.detail = this.list.length - 1;
+      if (this.detail < 0) this.view = 'grid';
+      showBanner('撕掉了这一页~', '', 1.1);
+      log('日记相册：删除后余 ' + this.list.length + ' 篇');
+    },
+
+    /** 网格页第 i 格命中检测 */
+    hitCell: function (p) {
+      var G = this.GRID;
+      for (var i = 0; i < this.list.length; i++) {
+        var col = i % G.cols, row = Math.floor(i / G.cols);
+        var x = G.x0 + col * (G.size + G.gap), y = G.y0 + row * (G.size + G.gap + 18);
+        if (p.x >= x - 8 && p.x <= x + G.size + 8 &&
+            p.y >= y - 8 && p.y <= y + G.size + 8) return i;
+      }
+      return -1;
+    },
+
+    hitRect: function (p, b) {
+      return p.x >= b.x - b.w / 2 && p.x <= b.x + b.w / 2 &&
+             p.y >= b.y - b.h / 2 && p.y <= b.y + b.h / 2;
+    },
+
+    onDown: function (p) {
+      if (this.confirmIdx >= 0) {   // 删除确认弹层打开时只响应两个按钮
+        if (this.hitRect(p, this.btnDelOk)) this.removeAt(this.confirmIdx);
+        else if (this.hitRect(p, this.btnDelNo)) this.confirmIdx = -1;
+        return;
+      }
+      if (this.view === 'grid') {
+        if (this.hitRect(p, this.btnBack)) { setState('TITLE'); return; }
+        var cell = this.hitCell(p);
+        if (cell >= 0) {
+          this.detail = cell;
+          this.view = 'detail';
+          this.detailAt = Game.t;   // 子视图切换时刻（Game.t 仅 setState 清零）
+          Game.fx.burst(p.x, p.y, { count: 8, colors: ['#ff8fb5', '#fff', '#ffe6a1'], speed: 200 });
+        }
+      } else {
+        if (this.hitRect(p, this.btnDel)) { this.confirmIdx = this.detail; return; }
+        this.view = 'grid';   // 点其它任意处（含返回）回网格
+      }
+    },
+
+    render: function (ctx, now) {
+      drawStageTitle(ctx, '草莓的日记本');
+      if (this.view === 'grid') this.renderGrid(ctx, now);
+      else this.renderDetail(ctx, now);
+      if (this.confirmIdx >= 0) this.renderConfirm(ctx, now);
+    },
+
+    /* ---- 网格页：缩略图宫格 + 底部返回 ---- */
+    renderGrid: function (ctx, now) {
+      if (!this.list.length) {
+        // 空态：治愈系引导，不给任何挫败感
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.font = '34px "PingFang SC", "Microsoft YaHei", sans-serif';
+        ctx.fillStyle = '#b06f92';
+        ctx.fillText('日记本还是空白的~', 375, 520);
+        ctx.fillText('打完 2 单订单进入自由工坊，', 375, 590);
+        ctx.fillText('做出蛋糕后点「收入日记相册」♪', 375, 644);
+        ctx.restore();
+        var bob = Math.sin(now * 0.002) * 10;
+        E.drawStrawberry(ctx, 375, 780 + bob, 2.6);
+        drawPillButton(ctx, this.btnBack, '回封面 ♪', '#ff8fb5', now);
+        return;
+      }
+      var G = this.GRID;
+      for (var i = 0; i < this.list.length; i++) {
+        var col = i % G.cols, row = Math.floor(i / G.cols);
+        var x = G.x0 + col * (G.size + G.gap), y = G.y0 + row * (G.size + G.gap + 18);
+        // 相纸底框（白边 + 轻微交错旋转，像贴在日记本上）
+        ctx.save();
+        ctx.translate(x + G.size / 2, y + G.size / 2);
+        ctx.rotate(((i % 2 === 0) ? -1 : 1) * 0.025);
+        ctx.fillStyle = '#fff';
+        roundRectPath(ctx, -G.size / 2 - 8, -G.size / 2 - 8, G.size + 16, G.size + 16, 14);
+        ctx.fill();
+        ctx.strokeStyle = '#eebbc9';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        var img = this.imgs[i];
+        if (img && img.complete && img.naturalWidth) {
+          ctx.drawImage(img, -G.size / 2, -G.size / 2, G.size, G.size);
+        } else {
+          ctx.fillStyle = '#f4dde6';
+          ctx.fillRect(-G.size / 2, -G.size / 2, G.size, G.size);
+        }
+        ctx.restore();
+        // 称号截断（最多 9 字，超出省略）
+        var t = this.list[i].title || '';
+        if (t.length > 9) t = t.slice(0, 9) + '…';
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.font = '20px "PingFang SC", "Microsoft YaHei", sans-serif';
+        ctx.fillStyle = '#9c5a78';
+        ctx.fillText(t, x + G.size / 2, y + G.size + 24);
+        ctx.restore();
+      }
+      drawHint(ctx, '点击照片可以放大看 ♪', 1170);
+      drawPillButton(ctx, this.btnBack, '回封面 ♪', '#ff8fb5', now);
+    },
+
+    /* ---- 详情页：大图 + 称号 + 日期 + 删除 ---- */
+    renderDetail: function (ctx, now) {
+      var e = this.list[this.detail];
+      if (!e) { this.view = 'grid'; return; }
+      var pop = Utils.clamp((Game.t - (this.detailAt || 0)) / 0.3, 0, 1);
+
+      // 大图（带白框的拍立得）
+      var S = 560;
+      var cx = 375, cy = 470 + (1 - Utils.easeOutCubic(pop)) * 40;
+      ctx.save();
+      ctx.globalAlpha = pop;
+      ctx.translate(cx, cy);
+      ctx.rotate(Math.sin(now * 0.001) * 0.008);   // 轻微摇曳
+      ctx.fillStyle = '#fff';
+      roundRectPath(ctx, -S / 2 - 14, -S / 2 - 14, S + 28, S + 28, 18);
+      ctx.fill();
+      ctx.strokeStyle = '#eebbc9';
+      ctx.lineWidth = 4;
+      ctx.stroke();
+      var img = this.imgs[this.detail];
+      if (img && img.complete && img.naturalWidth) {
+        ctx.drawImage(img, -S / 2, -S / 2, S, S);
+      } else {
+        ctx.fillStyle = '#f4dde6';
+        ctx.fillRect(-S / 2, -S / 2, S, S);
+      }
+      ctx.restore();
+
+      // 称号 + 日期
+      ctx.save();
+      ctx.globalAlpha = pop;
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 40px "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.lineWidth = 8;
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.strokeText('「' + e.title + '」', 375, 810);
+      ctx.fillStyle = '#d1547f';
+      ctx.fillText('「' + e.title + '」', 375, 810);
+      ctx.font = '26px "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.fillStyle = '#b06f92';
+      ctx.fillText(fmtDate(e.ts), 375, 864);
+      ctx.restore();
+
+      drawHint(ctx, '点击空白处返回相册', 1000);
+      drawPillButton(ctx, this.btnDel, '撕掉这一页', '#b06f92');
+      drawPillButton(ctx, this.btnBack, '回相册 ♪', '#ff8fb5', now);
+    },
+
+    /* ---- 删除确认弹层（防误删，但文案依然可爱不吓人） ---- */
+    renderConfirm: function (ctx) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(60, 35, 52, 0.35)';
+      ctx.fillRect(0, 0, 750, 1334);
+      ctx.translate(375, 975);
+      var w = 560, h = 440;
+      roundRectPath(ctx, -w / 2, -h / 2, w, h, 30);
+      ctx.fillStyle = '#fff8fb';
+      ctx.fill();
+      ctx.strokeStyle = '#eebbc9';
+      ctx.lineWidth = 5;
+      ctx.stroke();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = 'bold 38px "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.fillStyle = '#d1547f';
+      ctx.fillText('要撕掉这一页吗？', 0, -h / 2 + 76);
+      ctx.font = '27px "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.fillStyle = '#9c5a78';
+      ctx.fillText('这份大作会从日记本里消失哦', 0, -h / 2 + 138);
+      ctx.restore();
+      drawPillButton(ctx, this.btnDelOk, '撕掉它', '#ff8fb5');
+      drawPillButton(ctx, this.btnDelNo, '先留着', '#b8e6ff');
+    }
+  };
+
+  /* 圆角矩形路径（相对当前原点，供日记本卡片/弹层复用） */
+  function roundRectPath(ctx, x, y, w, h, r) {
+    E.roundRect(ctx, x, y, w, h, r);
+  }
+
   /* ================= 状态表 ================= */
 
   var States = {
     TITLE: TITLE,
+    DIARY: DIARY,
     ORDER_SHOW: ORDER_SHOW,
     BAKE_CHARGE: BAKE_CHARGE,
     PIPE_RHYTHM: PIPE_RHYTHM,
@@ -1860,6 +2183,7 @@
   var activePointerId = null;
   Utils.attachPointer(canvas, {
     onDown: function (p) {
+      BGM.kick();   // 首次手势解锁 BGM 自动播放
       if (activePointerId !== null) return;   // 忽略多余手指
       activePointerId = p.id;
       if (Game.cur && Game.cur.onDown) Game.cur.onDown(p);
@@ -1906,6 +2230,7 @@
     if (dt > 0) fpsSmooth = fpsSmooth * 0.95 + (1 / dt) * 0.05;
 
     Game.t += dt;
+    BGM.update(dt);
     if (Game.cur) {
       if (Game.cur.update) Game.cur.update(dt);
       Game.fx.update(dt);
