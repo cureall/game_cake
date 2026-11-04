@@ -1,6 +1,6 @@
 /**
  * entities.js —— 游戏实体对象
- * 蓄力条 / 节拍器 / 旋转托盘 / 蛋糕 / 水果 / 客人 / 粒子特效
+ * 蓄力条 / 旋转托盘 / 蛋糕 / 水果 / 客人 / 粒子特效
  * 全部基于虚拟坐标系 750x1334，使用 Canvas 原生几何图形绘制（无外部素材）。
  */
 (function (global) {
@@ -46,8 +46,10 @@
 
   /* ================= 蓄力条 ================= */
 
-  function ChargeBar(x, y, w, h) {
+  /* showGolden=false 供自由工坊使用：只看蓄力读数，无黄金区/磁吸提示 */
+  function ChargeBar(x, y, w, h, showGolden) {
     this.x = x; this.y = y; this.w = w; this.h = h;
+    this.showGolden = showGolden !== false;
     this.power = 0;    // 真实蓄力值 0~1（松手瞬间定格，决定胚体高度）
     this.display = 0;  // 显示值（松手后阻尼弹簧回落）
     this.vel = 0;
@@ -95,22 +97,24 @@
     ctx.lineWidth = 3;
     ctx.stroke();
 
-    // 黄金释放区间（阶段 2 巧克力辅助线的基础）
-    var gy = y + h * (1 - C.CHARGE.GOLDEN_MAX);
-    var gh = h * (C.CHARGE.GOLDEN_MAX - C.CHARGE.GOLDEN_MIN);
-    ctx.fillStyle = 'rgba(255, 214, 120, 0.55)';
-    ctx.fillRect(x + 3, gy, w - 6, gh);
-    // 巧克力磁吸高亮：蓄力中且当前值处于黄金区间 → 双层描边光晕脉冲
-    if (this.holding && this.power >= C.CHARGE.GOLDEN_MIN && this.power <= C.CHARGE.GOLDEN_MAX) {
-      var pulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.012);
-      ctx.strokeStyle = 'rgba(255, 190, 60, ' + (0.30 + 0.28 * pulse).toFixed(3) + ')';
-      ctx.lineWidth = 8 + 5 * pulse;
-      roundRect(ctx, x + 2, gy - 5, w - 4, gh + 10, w / 2);
-      ctx.stroke();
-      ctx.strokeStyle = 'rgba(255, 242, 200, ' + (0.65 + 0.35 * pulse).toFixed(3) + ')';
-      ctx.lineWidth = 3;
-      roundRect(ctx, x + 3, gy, w - 6, gh, w / 2);
-      ctx.stroke();
+    // 黄金释放区间（阶段 2 巧克力辅助线的基础；自由工坊隐藏）
+    if (this.showGolden) {
+      var gy = y + h * (1 - C.CHARGE.GOLDEN_MAX);
+      var gh = h * (C.CHARGE.GOLDEN_MAX - C.CHARGE.GOLDEN_MIN);
+      ctx.fillStyle = 'rgba(255, 214, 120, 0.55)';
+      ctx.fillRect(x + 3, gy, w - 6, gh);
+      // 巧克力磁吸高亮：蓄力中且当前值处于黄金区间 → 双层描边光晕脉冲
+      if (this.holding && this.power >= C.CHARGE.GOLDEN_MIN && this.power <= C.CHARGE.GOLDEN_MAX) {
+        var pulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.012);
+        ctx.strokeStyle = 'rgba(255, 190, 60, ' + (0.30 + 0.28 * pulse).toFixed(3) + ')';
+        ctx.lineWidth = 8 + 5 * pulse;
+        roundRect(ctx, x + 2, gy - 5, w - 4, gh + 10, w / 2);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(255, 242, 200, ' + (0.65 + 0.35 * pulse).toFixed(3) + ')';
+        ctx.lineWidth = 3;
+        roundRect(ctx, x + 3, gy, w - 6, gh, w / 2);
+        ctx.stroke();
+      }
     }
 
     // 填充柱
@@ -126,28 +130,6 @@
     ctx.restore();
   };
 
-  /* ================= 节拍驱动器 Metronome ================= */
-
-  function Metronome() {
-    this.interval = 60 / C.BEAT.BPM;
-    this.t = 0;
-    this.rate = 1;   // 阶段 2 牛奶糖缓速：节拍时间流速（1 正常 / 0.6 缓速），由主循环每帧写入
-  }
-
-  Metronome.prototype.reset = function () { this.t = 0; };
-  Metronome.prototype.update = function (dt) { this.t += dt * this.rate; };
-  Metronome.prototype.beatPhase = function () { return this.t / this.interval; };
-  Metronome.prototype.nearestIndex = function () { return Math.round(this.beatPhase()); };
-  /** 距最近拍点的时间差（秒） */
-  Metronome.prototype.distToNearest = function () {
-    return Math.abs(this.t - this.nearestIndex() * this.interval);
-  };
-  /** 拍点脉冲强度 1→0，用于按钮/标记的节拍脉动 */
-  Metronome.prototype.pulse = function () {
-    var p = this.beatPhase() % 1;
-    return Math.max(0, 1 - Math.min(p, 1 - p) * 8);
-  };
-
   /* ================= 旋转托盘 ================= */
 
   function Turntable() {
@@ -159,11 +141,6 @@
   Turntable.prototype.update = function (dt) {
     this.omega = U.lerp(this.omega, this.target, 1 - Math.exp(-3 * dt));
     this.angle = (this.angle + this.omega * dt) % TAU;
-  };
-
-  /** 与 Metronome 同步：每拍转过 360°/每圈花数 → 花必然均匀分布 */
-  Turntable.prototype.syncToBeat = function () {
-    this.target = TAU / (C.BEAT.FLOWERS_PER_CIRCLE * (60 / C.BEAT.BPM));
   };
 
   /** 顶视图托盘底盘 */
@@ -194,8 +171,10 @@
     this.height = C.CHARGE.MIN_HEIGHT;
     this.width = 250;
     this.topRadius = 205;
-    this.flowers = [];  // { a: 转盘局部角, tier }
-    this.fruits = [];   // { a, r, type } 转盘局部极坐标
+    this.flowers = [];  // { a: 转盘局部角, tier }；自由工坊另带 { r, color, scale }
+    this.fruits = [];   // { a, r, type } 转盘局部极坐标（自由工坊另带 scale）
+    this.layers = [];   // 自由工坊多层胚 [{ h }]，空 = 常规单层（height 即总高）
+    this.sugars = [];   // 自由工坊糖粒星 { a, r, color, size, rot }
   }
 
   /** 侧视图：底部锚点 (bx, by)，sx/sy 为压扁拉伸系数 */
@@ -212,22 +191,52 @@
     ctx.ellipse(0, 4, w * 0.62, 16, 0, 0, TAU);
     ctx.fill();
 
-    // 胚体
-    roundRect(ctx, -w / 2, -h, w, h, 24);
-    ctx.fillStyle = this.palette.sponge;
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(180, 120, 140, 0.25)';
-    ctx.lineWidth = 3;
-    ctx.stroke();
-
-    // 烘焙气孔纹理
-    ctx.fillStyle = 'rgba(190, 130, 100, 0.16)';
-    for (var i = 0; i < 8; i++) {
-      var px = -w / 2 + 28 + (i % 4) * 62 + (i > 3 ? 24 : 0);
-      var py = -h + 34 + Math.floor(i / 4) * Math.min(h - 60, 90);
-      ctx.beginPath();
-      ctx.arc(px, py, 6, 0, TAU);
+    // 胚体（自由工坊多层胚逐层绘制，层间夹奶油线；常规单层保持原视觉）
+    if (this.layers.length > 0) {
+      var acc = 0;
+      for (var li = 0; li < this.layers.length; li++) {
+        var lh = this.layers[li].h;
+        var ly = -h + acc;
+        roundRect(ctx, -w / 2, ly, w, lh, li === 0 ? 24 : 8);
+        ctx.fillStyle = li % 2 === 0 ? this.palette.sponge : '#f8e3ca';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(180, 120, 140, 0.25)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        // 每层两颗烘焙气孔
+        ctx.fillStyle = 'rgba(190, 130, 100, 0.16)';
+        for (var pi = 0; pi < 2; pi++) {
+          ctx.beginPath();
+          ctx.arc(-w / 2 + 62 + pi * 128 + (li % 2) * 30, ly + lh * 0.58, 5, 0, TAU);
+          ctx.fill();
+        }
+        acc += lh;
+      }
+      // 层间奶油夹心（层体全部画完再补线，避免被上一层覆盖）
+      acc = 0;
+      for (var mi = 1; mi < this.layers.length; mi++) {
+        acc += this.layers[mi - 1].h;
+        ctx.fillStyle = this.palette.cream;
+        roundRect(ctx, -w / 2 - 4, -h + acc - 5, w + 8, 11, 5);
+        ctx.fill();
+      }
+    } else {
+      roundRect(ctx, -w / 2, -h, w, h, 24);
+      ctx.fillStyle = this.palette.sponge;
       ctx.fill();
+      ctx.strokeStyle = 'rgba(180, 120, 140, 0.25)';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      // 烘焙气孔纹理
+      ctx.fillStyle = 'rgba(190, 130, 100, 0.16)';
+      for (var i = 0; i < 8; i++) {
+        var px = -w / 2 + 28 + (i % 4) * 62 + (i > 3 ? 24 : 0);
+        var py = -h + 34 + Math.floor(i / 4) * Math.min(h - 60, 90);
+        ctx.beginPath();
+        ctx.arc(px, py, 6, 0, TAU);
+        ctx.fill();
+      }
     }
 
     // 顶部奶油盖 + 垂滴
@@ -264,12 +273,23 @@
     ctx.arc(0, 0, R * 0.7, 0, TAU);
     ctx.fill();
 
-    // 奶油花环
+    // 奶油花环（半径与 Step 3 指示点共用同一配置，花才能正好盖住圆点；
+    // 自由工坊的花自带 r/color/scale，随手涂在哪里就画在哪里）
+    var ringR = R * C.RHYTHM.CREAM_RING_FRAC;
     for (var i = 0; i < this.flowers.length; i++) {
       var f = this.flowers[i];
-      var fx = Math.cos(f.a) * (R * 0.84);
-      var fy = Math.sin(f.a) * (R * 0.84);
-      drawCreamFlower(ctx, fx, fy, f.tier, this.palette.accent);
+      var fr2 = (f.r != null) ? f.r : ringR;
+      var fx = Math.cos(f.a) * fr2;
+      var fy = Math.sin(f.a) * fr2;
+      drawCreamFlower(ctx, fx, fy, f.tier, this.palette.accent, f.color, f.scale);
+    }
+
+    // 自由工坊糖粒星（贴在奶油面上不随判定，只负责闪）
+    for (var si = 0; si < this.sugars.length; si++) {
+      var sg = this.sugars[si];
+      drawStar(ctx, Math.cos(sg.a) * sg.r, Math.sin(sg.a) * sg.r, sg.size, sg.size * 0.45, sg.rot);
+      ctx.fillStyle = sg.color;
+      ctx.fill();
     }
 
     // 水果
@@ -277,34 +297,38 @@
       var fr = this.fruits[j];
       var x = Math.cos(fr.a) * fr.r;
       var y = Math.sin(fr.a) * fr.r;
-      if (fr.type === 'strawberry') drawStrawberry(ctx, x, y, 1.15);
-      else drawMacaron(ctx, x, y, 1.15, this.palette);
+      var sc = fr.scale || 1.15;
+      if (fr.type === 'strawberry') drawStrawberry(ctx, x, y, sc);
+      else drawMacaron(ctx, x, y, sc);
     }
   };
 
-  /** 奶油花：六瓣圆花瓣 + 分级花心 */
-  function drawCreamFlower(ctx, x, y, tier, accent) {
+  /** 奶油花：六瓣圆花瓣 + 分级花心
+   *  color/scale 供自由工坊彩色涂鸦花使用，缺省保持常规白色小花 */
+  function drawCreamFlower(ctx, x, y, tier, accent, color, scale) {
+    color = color || '#ffffff';
+    scale = scale || 1;
     ctx.save();
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = color;
     ctx.strokeStyle = 'rgba(230, 180, 200, 0.5)';
     ctx.lineWidth = 2;
     for (var i = 0; i < 6; i++) {
       var a = i * TAU / 6;
       ctx.beginPath();
-      ctx.arc(x + Math.cos(a) * 11, y + Math.sin(a) * 11, 10, 0, TAU);
+      ctx.arc(x + Math.cos(a) * 11 * scale, y + Math.sin(a) * 11 * scale, 10 * scale, 0, TAU);
       ctx.fill();
       ctx.stroke();
     }
     ctx.beginPath();
-    ctx.arc(x, y, 9, 0, TAU);
+    ctx.arc(x, y, 9 * scale, 0, TAU);
     ctx.fill();
-    // 判定分级花心：Perfect 金星 / Good 粉心 / Cute 灰粉心
-    ctx.fillStyle = (tier === 'perfect') ? '#ffc94d' : (tier === 'good' ? accent : '#d8a8bd');
+    // 判定分级花心：Perfect 金星 / Good·自由花 粉心 / 其余（含 rough）灰粉心
+    ctx.fillStyle = (tier === 'perfect') ? '#ffc94d' : (tier === 'good' || tier === 'free') ? accent : '#d8a8bd';
     if (tier === 'perfect') {
-      drawStar(ctx, x, y, 9, 4, 0);
+      drawStar(ctx, x, y, 9 * scale, 4 * scale, 0);
     } else {
       ctx.beginPath();
-      ctx.arc(x, y, 6.5, 0, TAU);
+      ctx.arc(x, y, 6.5 * scale, 0, TAU);
     }
     ctx.fill();
     ctx.restore();
@@ -592,10 +616,10 @@
     }
   };
 
-  /* ================= 甜点精灵（阶段 2：弱惩罚容错介入） =================
-   * 素材为 assets/fairy_*.png 透明底立绘；加载失败、或画布会被污染
+  /* ================= 图像资产（阶段 2 精灵 + 视效材料 6 图） =================
+   * 素材为 assets/ 下透明底立绘与环境底图；加载失败、或画布会被污染
    * （file:// 直开时 drawImage 本地图片 → toDataURL 抛 SecurityError，
-   * "保存成果"功能失效）时自动退回 Canvas 简笔形象，双击 index.html 一切功能照常。 */
+   * "保存成果"功能失效）时自动退回 Canvas 简笔形象/渐变兜底，双击 index.html 一切功能照常。 */
 
   var SPIRIT_IMGS = {};
 
@@ -603,7 +627,10 @@
     var defs = [
       ['vanilla', 'assets/fairy_vanilla.png'],
       ['chocolat', 'assets/fairy_chocolat.png'],
-      ['caramel', 'assets/fairy_caramel.png']
+      ['caramel', 'assets/fairy_caramel.png'],
+      ['ichigo', 'assets/ichigo.png'],          // 主角天野草莓（视效材料 图3）
+      ['bg_title', 'assets/bg_title.jpg'],      // 封面全家福（图1，TITLE 全屏）
+      ['bg_kitchen', 'assets/bg_kitchen.jpg']   // 工坊环境底图（图2，全局背景）
     ];
     for (var i = 0; i < defs.length; i++) {
       (function (key, src) {
@@ -622,6 +649,9 @@
       })(defs[i][0], defs[i][1]);
     }
   }
+
+  /** 取已通过污染探测、可安全 drawImage 的图（未加载/不安全返回 null） */
+  function getSpiritImage(key) { return SPIRIT_IMGS[key] || null; }
 
   /** 精灵实体：常驻 sin 浮动 + 机制触发的弹跳 / 说话 / 点头
    *  三个临时状态均为 >=0 计时，超时自动归位 -1。 */
@@ -807,14 +837,14 @@
     drawStrawberry: drawStrawberry,
     drawMacaron: drawMacaron,
     ChargeBar: ChargeBar,
-    Metronome: Metronome,
     Turntable: Turntable,
     Cake: Cake,
     Fruit: Fruit,
     Guest: Guest,
     FX: FX,
     Spirit: Spirit,
-    preloadSpirits: preloadSpirits
+    preloadSpirits: preloadSpirits,
+    getSpiritImage: getSpiritImage
   };
 
 })(window);

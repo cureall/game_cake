@@ -27,6 +27,15 @@
     return 1 - Math.pow(1 - t, 3);
   }
 
+  /** 角度归一化到 (-π, π]（处理 360° 环形回绕后的最短角差） */
+  function normAngle(a) {
+    var PI = Math.PI, TAU = PI * 2;
+    a %= TAU;
+    if (a > PI) a -= TAU;
+    else if (a <= -PI) a += TAU;
+    return a;
+  }
+
   /* ---------------- 坐标映射 ---------------- */
 
   /**
@@ -58,8 +67,9 @@
         ev.preventDefault(); // 阻止浏览器默认行为（需配合 CSS touch-action:none）
         if (domEvent === 'pointerdown') {
           // 指针捕获：手指/鼠标滑出画布（如蓄力时滑进 Letterboxing 黑边）也能收到 up/cancel，
-          // 防止单指锁 activePointerId 永不清除导致全局点击失灵
-          canvas.setPointerCapture(ev.pointerId);
+          // 防止单指锁 activePointerId 永不清除导致全局点击失灵；
+          // 合成 PointerEvent（自动化探针）无 active pointer 会抛 NotFoundError，吞掉不影响流程
+          try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* 非真实指针 */ }
         }
         var p = toVirtual(canvas, ev.clientX, ev.clientY);
         p.id = ev.pointerId;
@@ -106,6 +116,7 @@
     clamp: clamp,
     lerp: lerp,
     easeOutCubic: easeOutCubic,
+    normAngle: normAngle,
     toVirtual: toVirtual,
     attachPointer: attachPointer,
     fillCircle: fillCircle,

@@ -39,7 +39,7 @@
 
   var LAYOUT = {
     plateX: 375, plateY: 1010,          // 侧视图：蛋糕落点（烤胚阶段）
-    barX: 84, barY: 420, barW: 48, barH: 520,   // 蓄力条
+    barX: 150, barY: 420, barW: 48, barH: 520,  // 蓄力条（左列让给巧克力精灵）
     ttCx: 375, ttCy: 650, plateR: 295,  // 顶视图：转盘
     nozzleR: 338,                       // 裱花口（固定屏幕右侧 3 点钟方向）
     btnX: 375, btnY: 1105, btnR: 115,   // 裱花大按钮
@@ -53,7 +53,6 @@
     orderIndex: 0, order: null,
     cake: null,
     turntable: new E.Turntable(),
-    metronome: new E.Metronome(),
     guest: new E.Guest(),
     fx: new E.FX(),
     score: null
@@ -104,17 +103,115 @@
     }
   }
 
+  /* ================= 主角天野草莓（视效材料 图3） =================
+   * 常驻左下陪伴制作；结算时平滑滑到作品旁"探出头"，头顶气泡夸奖。
+   * 目标位按当前状态自动切换（指数平滑趋近），无需逐状态布点。 */
+  var ichigo = {
+    x: -220, y: 1150, size: 280,
+    t: Math.random() * 10,
+    sayT: -1, sayDelay: 0, sayText: '',
+    nextIdle: 9 + Math.random() * 8,
+
+    target: function () {
+      if (Game.name === 'EVALUATION' || Game.name === 'FREE_RESULT') return C.ICHIGO.POS_SHOW;
+      if (Game.name === 'TITLE') return { x: -240, y: 1150, size: 280 };   // 封面自带主角，屏外候场
+      return C.ICHIGO.POS_HOME;
+    },
+
+    update: function (dt) {
+      this.t += dt;
+      var tg = this.target();
+      var k = 1 - Math.exp(-4 * dt);
+      this.x += (tg.x - this.x) * k;
+      this.y += (tg.y - this.y) * k;
+      this.size += (tg.size - this.size) * k;
+      if (this.sayDelay > 0) {
+        this.sayDelay -= dt;
+        if (this.sayDelay <= 0) this.sayT = 0;
+      } else if (this.sayT >= 0) {
+        this.sayT += dt;
+        if (this.sayT > C.ICHIGO.SAY_DUR) this.sayT = -1;
+      } else if (Game.name !== 'TITLE' && Game.name !== 'EVALUATION' &&
+                 Game.name !== 'FREE_RESULT') {
+        this.nextIdle -= dt;   // 制作阶段偶尔自言自语
+        if (this.nextIdle <= 0) {
+          this.nextIdle = 12 + Math.random() * 10;
+          this.sayText = pick(C.ICHIGO.IDLE);
+          this.sayT = 0;
+        }
+      }
+    },
+
+    /** 结算亮相：延迟开口夸一句（视效材料：头顶冒出气泡夸奖） */
+    cheer: function () {
+      this.sayText = pick(C.ICHIGO.SHOW);
+      this.sayDelay = C.ICHIGO.SAY_DELAY;
+      this.sayT = -1;
+    },
+
+    render: function (ctx) {
+      if (this.x < -160) return;   // 未入场/封面页不画
+      var bob = Math.sin(this.t * 1.5) * 6;
+      var cy = this.y + bob;
+      var img = E.getSpiritImage('ichigo');
+      ctx.save();
+      if (img) {
+        var w = this.size * img.width / img.height;
+        ctx.fillStyle = 'rgba(120, 60, 90, 0.10)';
+        ctx.beginPath();
+        ctx.ellipse(this.x, this.y + this.size / 2 - 6, w * 0.28, 10, 0, 0, TAU);
+        ctx.fill();
+        ctx.drawImage(img, this.x - w / 2, cy - this.size / 2, w, this.size);
+      } else {
+        this.drawFallback(ctx, this.x, cy);
+      }
+      ctx.restore();
+      if (this.sayT >= 0) {
+        ctx.save();
+        ctx.globalAlpha = Utils.clamp((C.ICHIGO.SAY_DUR - this.sayT) / 0.3, 0, 1);
+        E.drawBubble(ctx, Utils.clamp(this.x + 60, 190, 560),
+          cy - this.size / 2 - 76, this.sayText, 24);
+        ctx.restore();
+      }
+    },
+
+    /* 无图兜底：简笔小草莓（粉双马尾 + 白厨帽 + 粉裙） */
+    drawFallback: function (ctx, cx, cy) {
+      var r = this.size * 0.15;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.fillStyle = '#f06292';
+      ctx.beginPath(); ctx.arc(-r * 1.4, -r * 0.2, r * 0.55, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(r * 1.4, -r * 0.2, r * 0.55, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#fffdf9';
+      ctx.beginPath(); ctx.ellipse(0, -r * 1.7, r * 0.8, r * 0.45, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#ffe4d4';
+      ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
+      ctx.strokeStyle = '#5c4033'; ctx.lineWidth = r * 0.09; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(-r * 0.35, -r * 0.05, r * 0.18, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+      ctx.beginPath(); ctx.arc(r * 0.35, -r * 0.05, r * 0.18, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,140,170,0.5)';
+      ctx.beginPath(); ctx.ellipse(-r * 0.6, r * 0.35, r * 0.16, r * 0.1, 0, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(r * 0.6, r * 0.35, r * 0.16, r * 0.1, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#ffb6c1';
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.85, r * 0.9); ctx.quadraticCurveTo(0, r * 2.2, r * 0.85, r * 0.9);
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+  };
+
   /* ---- 牛奶糖缓速魔法（project.md 三.1）----
    * 点击牛奶糖：蛋糕转盘 ω 与节拍流速平滑降低 40%（BGM 阶段 4 接入后同步变速），
    * 持续一个循环 = 当前阶段正常转速转一圈的时长（夹 5~10s）；跨阶段自动终止。 */
   var slowmo = { active: false, t: 0, dur: 0 };
 
   function baseOmega() {
-    if (Game.name === 'PIPE_RHYTHM')
-      return TAU / (C.BEAT.FLOWERS_PER_CIRCLE * (60 / C.BEAT.BPM));
+    if (Game.name === 'PIPE_RHYTHM') return TAU / C.RHYTHM.ROTATION_PERIOD;
     if (Game.name === 'TOPPING_DROP') return TAU / C.TOPPING.SPIN_PERIOD;
     if (Game.name === 'EVALUATION') return 0.35;   // 3D 失败回退 2D 的缓转
-    return 0;
+    if (Game.name === 'FREE_RESULT') return 0.3;   // 自由关大作 2D 缓转展示
+    return 0;   // FREE_STAGE（转盘静止，涂鸦所见即所得）与其余阶段
   }
 
   function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -134,15 +231,12 @@
   }
 
   function updateSlowmo(dt) {
-    if (!slowmo.active) { Game.metronome.rate = 1; return; }
+    if (!slowmo.active) return;
     slowmo.t += dt;
     if (slowmo.t >= slowmo.dur) {
       slowmo.active = false;
-      Game.metronome.rate = 1;
       log('缓速魔法结束，转速恢复');
-      return;
     }
-    Game.metronome.rate = 1 - C.SPIRIT.SLOW.REDUCE;
   }
 
   /** 牛奶糖按钮命中检测（裱花/顶料阶段 onDown 优先于玩法点击） */
@@ -232,6 +326,15 @@
   }
 
   function renderBackground(ctx, now) {
+    // 工坊环境底图（视效材料 图2）：全幅铺底，上盖一层淡粉纱
+    // 保证悬浮的 Canvas UI 文字对比度；图未就绪/file:// 不安全时退回渐变
+    var bg = E.getSpiritImage('bg_kitchen');
+    if (bg) {
+      ctx.drawImage(bg, 0, 0, 750, 1334);
+      ctx.fillStyle = 'rgba(255, 240, 247, 0.22)';
+      ctx.fillRect(0, 0, 750, 1334);
+      return;
+    }
     var g = ctx.createLinearGradient(0, 0, 0, 1334);
     g.addColorStop(0, '#fff6f9');
     g.addColorStop(1, '#ffe0ec');
@@ -268,11 +371,64 @@
     ctx.restore();
   }
 
-  /** 顶视图统一入口：底盘 + 旋转中的蛋糕主体 */
-  function renderTurntableScene(ctx, plateScale) {
+  /** 圆形行动按钮（自由工坊"挤奶油/去装饰/完成"，pulse 0~1 控制脉动强度） */
+  function drawActionButton(ctx, x, y, r, lines, pulse, now) {
+    var beat = 0.5 + 0.5 * Math.sin((now || performance.now()) * 0.005);
+    ctx.save();
+    ctx.translate(x, y);
+    var s = 1 + 0.05 * pulse * beat;
+    ctx.scale(s, s);
+    var g = ctx.createRadialGradient(0, -r * 0.3, r * 0.2, 0, 0, r);
+    g.addColorStop(0, '#ffd0e0');
+    g.addColorStop(1, '#ff7fae');
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.lineWidth = 7;
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 36px "PingFang SC", "Microsoft YaHei", sans-serif';
+    for (var i = 0; i < lines.length; i++)
+      ctx.fillText(lines[i], 0, (i - (lines.length - 1) / 2) * 44);
+    ctx.restore();
+  }
+
+  /** 胶囊按钮（自由工坊结算双按钮；color 为主色调，now 可选脉动） */
+  function drawPillButton(ctx, b, label, color, now) {
+    var s = now ? 1 + 0.03 * (0.5 + 0.5 * Math.sin(now * 0.005)) : 1;
+    var rw = b.w / 2, rh = b.h / 2, rr = rh;
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.scale(s, s);
+    ctx.beginPath();
+    ctx.moveTo(-rw + rr, -rh);
+    ctx.arcTo(rw, -rh, rw, rh, rr);
+    ctx.arcTo(rw, rh, -rw, rh, rr);
+    ctx.arcTo(-rw, rh, -rw, -rh, rr);
+    ctx.arcTo(-rw, -rh, rw, -rh, rr);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 32px "PingFang SC", "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = '#fff';
+    ctx.fillText(label, 0, 2);
+    ctx.restore();
+  }
+
+  /** 顶视图统一入口：底盘 + 旋转中的蛋糕主体（自由工坊传 plateColor） */
+  function renderTurntableScene(ctx, plateScale, plateColor) {
     var s = plateScale || 1;
     var cx = LAYOUT.ttCx, cy = LAYOUT.ttCy;
-    E.Turntable.prototype.renderPlate(ctx, cx, cy, LAYOUT.plateR * s, Game.order.plate);
+    E.Turntable.prototype.renderPlate(ctx, cx, cy, LAYOUT.plateR * s, plateColor || Game.order.plate);
     ctx.save();
     ctx.translate(cx, cy);
     ctx.scale(s, s);
@@ -280,6 +436,78 @@
     Game.cake.renderTop(ctx);
     ctx.restore();
   }
+
+  /* ================================================================
+   * 状态 0：STATE_TITLE —— 封面标题页（视效材料 图1：官方全家福）
+   * 全屏封面 + "开始制作蛋糕"粉色大按钮；图未就绪时渐变 + 大字兜底。
+   * ================================================================ */
+
+  var TITLE = {
+    btn: { x: 375, y: 1040, w: 500, h: 150 },
+
+    onDown: function () {
+      // 任意点击即开始（零门槛）；大按钮只是视觉引导
+      log('封面：点击开始 → 第一单');
+      setState('ORDER_SHOW');
+    },
+
+    render: function (ctx, now) {
+      var img = E.getSpiritImage('bg_title');
+      if (img) {
+        ctx.drawImage(img, 0, 0, 750, 1334);
+      } else {
+        // 兜底：渐变 + 大标题（图加载失败/画布不安全时依然可进入游戏）
+        var g = ctx.createLinearGradient(0, 0, 0, 1334);
+        g.addColorStop(0, '#ffd9e8');
+        g.addColorStop(1, '#ffb7cf');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, 750, 1334);
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 88px "PingFang SC", "Microsoft YaHei", sans-serif';
+        ctx.lineWidth = 14;
+        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+        ctx.strokeText('梦色蛋糕师', 375, 480);
+        ctx.fillStyle = '#e2557e';
+        ctx.fillText('梦色蛋糕师', 375, 480);
+        ctx.font = '34px "PingFang SC", "Microsoft YaHei", sans-serif';
+        ctx.fillStyle = '#9c5a78';
+        ctx.fillText('· 甜点工坊 ·', 375, 552);
+        ctx.restore();
+      }
+
+      // "开始制作蛋糕"大按钮（脉动，视效材料：居中可爱粉色大按钮）
+      var b = this.btn;
+      var pulse = 0.5 + 0.5 * Math.sin(now * 0.004);
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.scale(1 + 0.035 * pulse, 1 + 0.035 * pulse);
+      var rw = b.w / 2, rh = b.h / 2, rr = rh;
+      ctx.beginPath();
+      ctx.moveTo(-rw + rr, -rh);
+      ctx.arcTo(rw, -rh, rw, rh, rr);
+      ctx.arcTo(rw, rh, -rw, rh, rr);
+      ctx.arcTo(-rw, rh, -rw, -rh, rr);
+      ctx.arcTo(-rw, -rh, rw, -rh, rr);
+      ctx.closePath();
+      var g2 = ctx.createLinearGradient(0, -rh, 0, rh);
+      g2.addColorStop(0, '#ff9ec4');
+      g2.addColorStop(1, '#ff6f9f');
+      ctx.fillStyle = g2;
+      ctx.fill();
+      ctx.lineWidth = 8;
+      ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+      ctx.stroke();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = 'bold 52px "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.fillStyle = '#fff';
+      ctx.fillText('♪ 开始制作蛋糕 ♪', 0, 0);
+      ctx.restore();
+
+      drawHint(ctx, '纯粹的自由烘焙时光', 1270);
+    }
+  };
 
   /* ================================================================
    * 状态 1：STATE_ORDER_SHOW —— 客人提出需求
@@ -455,99 +683,119 @@
   };
 
   /* ================================================================
-   * 状态 3：STATE_PIPE_RHYTHM —— 节拍裱花
-   * 不限时：只要没点满 TOTAL_BEATS 朵，转盘就不停转，
-   * 漏掉的拍可以在下一圈同一位置补救；圈数不影响评分。
+   * 状态 3：STATE_PIPE_RHYTHM —— 旋转裱花（temp2.md 角度判定版）
+   * 转盘恒速顺时针无限旋转（RHYTHM.ROTATION_PERIOD 秒/圈），裱花嘴
+   * 固定在世界 0°（3 点钟）。点击瞬间把裱花嘴在盘面本地系的投影角
+   * 原样落花 —— 点早点晚只改变落点本身，严禁吸附对齐到指示点；
+   * 再按与最近指示点的归一化偏差 e = Δθ/步长 ∈ [-0.5, +0.5) 分级。
+   * 无限循环补漏：漏掉的槽位等下一圈转到裱花嘴再补，点满 8/8 收工。
    * ================================================================ */
 
   var PIPE_RHYTHM = {
-    placedSet: null, placedCount: 0, doneAt: -1, vanillaSaid: 0,
+    slots: null,       // 指示点槽位数组（temp2.md 五：isActive 为未来空拍预留，当前全 true）
+    filledCount: 0,
+    doneAt: -1,
+    DONE_DELAY: 1.0,   // 点满后的停留时长（秒）再进 Step 4
 
     enter: function () {
-      Game.metronome.reset();
-      Game.turntable.syncToBeat();
-      this.placedSet = {};
-      this.placedCount = 0;
+      var n = C.RHYTHM.SLOT_COUNT;
+      this.slots = [];
+      for (var i = 0; i < n; i++) {
+        this.slots.push({ id: i, targetAngle: i * 360 / n, isActive: true, filled: false });
+      }
+      this.filledCount = 0;
       this.doneAt = -1;
-      this.vanillaSaid = 0;   // 香草兜底台词限流：一阶段最多说 2 次，避免刷屏
-      showBanner('Step 3 · 裱花', '跟着♪节拍点满 ' + C.BEAT.TOTAL_BEATS + ' 朵奶油花！', 1.5);
+      showBanner('Step 3 · 裱花', '圆点对准裱花嘴时点满 ' + n + ' 朵花！', 1.5);
     },
 
     update: function (dt) {
-      Game.metronome.update(dt);   // 转盘由主循环统一驱动，此处不重复 update
-      // 点满即收：不再按固定时长结束，漏拍者下一圈继续（圈数不限、不计入评分）
-      if (this.placedCount >= C.BEAT.TOTAL_BEATS) {
+      if (this.filledCount >= this.slots.length) {
         if (this.doneAt < 0) {
           this.doneAt = Game.t;
-          log('裱花点满 ' + C.BEAT.TOTAL_BEATS + ' 朵，用时 ' + Game.t.toFixed(1) + 's（' + (Game.t / Game.metronome.interval / C.BEAT.FLOWERS_PER_CIRCLE).toFixed(2) + ' 圈）');
+          log('裱花点满 ' + this.filledCount + ' 朵，用时 ' + Game.t.toFixed(1) +
+            's（约 ' + (Game.t / C.RHYTHM.ROTATION_PERIOD).toFixed(2) + ' 圈）');
         }
-        if (Game.t - this.doneAt >= 0.6) setState('TOPPING_DROP');
+        if (Game.t - this.doneAt >= this.DONE_DELAY) setState('TOPPING_DROP');
       }
     },
 
-    onDown: function (p) {
-      // 牛奶糖缓速按钮优先判定（点击头像不挤奶油）
-      if (hitCaramel(p)) { triggerSlowmo(); return; }
-      var m = Game.metronome;
-      var raw = m.nearestIndex();
-      // 拍位按总拍数取模：下一圈（乃至第 N 圈）转到同一位置即可补救这一拍
-      var idx = raw % C.BEAT.TOTAL_BEATS;
-      if (this.placedSet[idx]) {
-        // 该拍已有花（本圈或此前圈点过）：不惩罚，轻声提示
-        log('裱花重复拍点 #' + idx + '（原拍 ' + raw + '），忽略');
-        Game.fx.text(LAYOUT.btnX, LAYOUT.btnY - 150, '这一拍有花啦♪', '#b48ead', 30);
+    onDown: function () {
+      // 真实落点（temp2.md 二.3）：裱花嘴世界角恒为 0°，
+      // 其盘面本地角 = (0 - θ_disk) mod 360°，直接作为落花角存储，不吸附
+      var local = (TAU - Game.turntable.angle) % TAU;
+
+      // 归属最近激活槽位，算归一化偏差 e = Δθ/步长（temp2.md 三）
+      var step = TAU / this.slots.length;
+      var k = -1, d = 0;
+      for (var i = 0; i < this.slots.length; i++) {
+        if (!this.slots[i].isActive) continue;
+        var dd = Utils.normAngle(local - this.slots[i].targetAngle * Math.PI / 180);
+        if (k < 0 || Math.abs(dd) < Math.abs(d)) { k = i; d = dd; }
+      }
+      var slot = this.slots[k];
+      var e = d / step;
+
+      // 槽位防重（temp2.md 四.2）：最近槽位已有花 → 忽略本次点击，不叠花
+      if (slot.filled) {
+        log('裱花重复槽位 #' + k + '（e=' + e.toFixed(3) + '），忽略');
+        Game.fx.text(LAYOUT.btnX, LAYOUT.btnY - 150, '这朵已经有花啦♪', '#b48ead', 30);
         return;
       }
-      this.placedSet[idx] = true;
-      this.placedCount++;
-      if (raw >= C.BEAT.TOTAL_BEATS) log('跨圈补救：第 ' + (Math.floor(raw / C.BEAT.FLOWERS_PER_CIRCLE) + 1) + ' 圈补上拍 #' + idx);
+      slot.filled = true;
+      this.filledCount++;
 
-      // 判定分级：点歪不改失败 —— 香草强制挥棒，把一切偏差兜底改写为 Cute（project.md 三.1）
-      var d = m.distToNearest();
-      var tier = d <= C.BEAT.WINDOW_PERFECT ? 'perfect' : d <= C.BEAT.WINDOW_GOOD ? 'good' : 'cute';
-      Game.cake.flowers.push({ a: TAU - (Game.turntable.angle % TAU), tier: tier });
+      // 分级判定：阈值实时读 Config，控制台调 RHYTHM.PERFECT_WINDOW 立即生效
+      var absE = Math.abs(e);
+      var tier = absE <= C.RHYTHM.PERFECT_WINDOW ? 'perfect'
+               : absE <= C.RHYTHM.GOOD_WINDOW ? 'good' : 'rough';
 
-      log('裱花拍点 #' + idx + '：偏差=' + d.toFixed(3) + 's 判定=' + tier);
+      // 花按真实局部角落下：rough（偏得离谱）也照画，只是不弹评价文字
+      Game.cake.flowers.push({ a: local, tier: tier });
       Game.score.flowers++;
-      if (tier === 'perfect') Game.score.perfects++;
 
-      // 特效：裱花口位于固定屏幕位（转盘 3 点钟方向）
+      // 评价文字统一在固定裱花口弹出；e > 0 = 点早（花落在槽位前方），e < 0 = 点晚
       var nx = LAYOUT.ttCx + LAYOUT.nozzleR, ny = LAYOUT.ttCy;
       if (tier === 'perfect') {
-        Game.fx.burst(nx, ny, { count: 14, colors: ['#ffc94d', '#ffe6a1', '#fff'], speed: 300 });
-        Game.fx.text(nx, ny - 40, 'Perfect!', '#e8a20c', 42);
+        Game.score.perfects++;
+        Game.fx.burst(nx, ny, { count: 14, colors: ['#ffc94d', '#ffe6a1', '#ff8fb5', '#fff'], speed: 300 });
+        Game.fx.text(nx, ny - 40, 'PERFECT!', '#e8a20c', 42);
       } else if (tier === 'good') {
         Game.fx.burst(nx, ny, { count: 9, colors: ['#ff8fb5', '#ffd3e2'], speed: 230 });
-        Game.fx.text(nx, ny - 40, 'Good!', '#e2557e', 40);
-      } else {
-        // Cute 不是失败：香草挥棒撒金粉 + 台词鼓励（台词限流），转盘上的花照常绽放
-        vanillaRescue(this.vanillaSaid < 2 ? (this.vanillaSaid++, C.SPIRIT.VANILLA.CHEER) : null);
-        Game.fx.burst(nx, ny, { count: 6, colors: ['#c9a7d6', '#ecd9f2'], speed: 180, shape: 'circle' });
-        Game.fx.text(nx, ny - 40, 'Cute~', '#a06fb5', 38);
+        Game.fx.text(nx, ny - 40, 'GOOD!', '#e2557e', 40);
       }
+      log('裱花槽位 #' + k + '：e=' + e.toFixed(3) + '（' + (e >= 0 ? '早' : '晚') + ' ' +
+        (Math.abs(d) * 180 / Math.PI).toFixed(1) + '°）判定=' + tier +
+        ' 进度 ' + this.filledCount + '/' + this.slots.length);
     },
 
     render: function (ctx) {
-      drawStageTitle(ctx, 'Step 3 / 4 · 节拍裱花 ' + this.placedCount + '/' + C.BEAT.TOTAL_BEATS);
-      var m = Game.metronome;
-
+      drawStageTitle(ctx, 'Step 3 / 4 · 节拍裱花 ' + this.filledCount + '/' + this.slots.length);
       renderTurntableScene(ctx, 1);
 
-      // 节拍点标记环（随转盘旋转，靠近裱花口时点亮）
-      var n = C.BEAT.FLOWERS_PER_CIRCLE;
-      for (var i = 0; i < n; i++) {
-        var wa = (Game.turntable.angle + i * TAU / n) % TAU;
-        var dist = Math.min(wa, TAU - wa);
-        var glow = Math.max(0, 1 - dist * 2.4);
-        var r = 10 + glow * 8;
+      // 盘边指示点（temp2.md 二.2）：进入转盘本地系绘制，随盘旋转；
+      // 与奶油花共用半径 → 对准时花正好盖住圆点，点偏则肉眼可见地错开。
+      // 已填充槽位淡出（花本体即标记），未填充的靠近裱花嘴时点亮。
+      var ringR = Game.cake.topRadius * C.RHYTHM.CREAM_RING_FRAC;
+      var pulse = 0;
+      ctx.save();
+      ctx.translate(LAYOUT.ttCx, LAYOUT.ttCy);
+      ctx.rotate(Game.turntable.angle);
+      for (var i = 0; i < this.slots.length; i++) {
+        var s = this.slots[i];
+        var la = s.targetAngle * Math.PI / 180;
+        var wa = (la + Game.turntable.angle) % TAU;   // 槽位当前世界角
+        var dist = Math.min(wa, TAU - wa);            // 距 3 点钟裱花嘴的角距
+        var glow = s.filled ? 0 : Math.max(0, 1 - dist * 2.4);
+        if (glow > pulse) pulse = glow;
         ctx.beginPath();
-        ctx.arc(LAYOUT.ttCx + Math.cos(wa) * 252, LAYOUT.ttCy + Math.sin(wa) * 252, r, 0, TAU);
-        ctx.fillStyle = 'rgba(255,' + Math.round(160 + 60 * glow) + ',' + Math.round(190 + 40 * glow) + ',' + (0.45 + 0.55 * glow) + ')';
+        ctx.arc(Math.cos(la) * ringR, Math.sin(la) * ringR, 10 + glow * 8, 0, TAU);
+        ctx.fillStyle = s.filled ? 'rgba(216,168,189,0.18)'
+          : 'rgba(255,' + Math.round(160 + 60 * glow) + ',' + Math.round(190 + 40 * glow) + ',' + (0.45 + 0.55 * glow) + ')';
         ctx.fill();
       }
+      ctx.restore();
 
-      // 固定裱花口（3 点钟方向）
-      var pulse = m.pulse();
+      // 固定裱花嘴（3 点钟方向）
       var nx = LAYOUT.ttCx + LAYOUT.nozzleR, ny = LAYOUT.ttCy;
       ctx.save();
       ctx.translate(nx, ny);
@@ -563,7 +811,7 @@
       ctx.fill();
       ctx.restore();
 
-      // 中央大按钮（随节拍脉动）
+      // 中央大按钮（有圆点接近裱花嘴时脉动提示）
       var br = LAYOUT.btnR * (1 + 0.06 * pulse);
       var g = ctx.createRadialGradient(LAYOUT.btnX, LAYOUT.btnY - br * 0.3, br * 0.2, LAYOUT.btnX, LAYOUT.btnY, br);
       g.addColorStop(0, '#ffb3cd');
@@ -581,21 +829,19 @@
       ctx.fillStyle = '#fff';
       ctx.fillText('裱花！', LAYOUT.btnX, LAYOUT.btnY - 8);
       ctx.font = '24px "PingFang SC", "Microsoft YaHei", sans-serif';
-      ctx.fillText('♪ 跟上节拍 ♪', LAYOUT.btnX, LAYOUT.btnY + 42);
+      ctx.fillText('对准圆点按下去♪', LAYOUT.btnX, LAYOUT.btnY + 42);
 
-      // 顶部进度点：已放朵数（不再随时间走，漏拍不亮、补上才亮）
-      var total = C.BEAT.TOTAL_BEATS;
-      var done = this.placedCount;
-      for (var k = 0; k < total; k++) {
-        var dx = 375 + (k - (total - 1) / 2) * 34;
+      // 顶部进度点：与槽位一一对应，补到哪朵亮哪朵
+      var total = this.slots.length;
+      for (var q = 0; q < total; q++) {
+        var dx = 375 + (q - (total - 1) / 2) * 34;
         ctx.beginPath();
-        ctx.arc(dx, 95, k < done ? 9 : 7, 0, TAU);
-        ctx.fillStyle = k < done ? '#ff8fb5' : 'rgba(200,150,175,0.35)';
+        ctx.arc(dx, 95, this.slots[q].filled ? 9 : 7, 0, TAU);
+        ctx.fillStyle = this.slots[q].filled ? '#ff8fb5' : 'rgba(200,150,175,0.35)';
         ctx.fill();
       }
 
       drawHint(ctx, '点击屏幕任意位置挤出奶油花');
-      renderSpirits(ctx, ['vanilla', 'caramel']);
     }
   };
 
@@ -740,6 +986,7 @@
       spirits.chocolat.bounce(0.35);
       spirits.caramel.bounce(0.60);
       spirits.vanilla.say(C.SPIRIT.VANILLA.DONE);
+      ichigo.cheer();   // 主角从旁边滑入，延迟冒泡夸奖（视效材料 图3）
     },
 
     exit: function () {
@@ -916,7 +1163,8 @@
       if (p.x >= b.x - r && p.x <= b.x + r && p.y >= b.y - r && p.y <= b.y + r) {
         log('再来一块：命中 (' + p.x.toFixed(0) + ', ' + p.y.toFixed(0) + ') → 下一单');
         Game.orderIndex++;
-        setState('ORDER_SHOW');
+        // 阶段 3：每累计 2 单常规订单，插入一次草莓自由工坊（project.md 三.3）
+        setState(Game.orderIndex % C.FREE.EVERY === 0 ? 'FREE_STAGE' : 'ORDER_SHOW');
       } else {
         log('结算点击落空：(' + p.x.toFixed(0) + ', ' + p.y.toFixed(0) + ')，按钮区 x∈[' + (b.x - r) + ',' + (b.x + r) + '] y∈[' + (b.y - r) + ',' + (b.y + r) + ']');
       }
@@ -976,7 +1224,7 @@
       var lines = [
         ['松软烤胚', '+' + s.bake],
         ['奶油花 ×' + s.flowers, '+' + s.flowers * C.SCORE.FLOWER],
-        ['节拍 Perfect ×' + s.perfects, '+' + s.perfects * C.SCORE.PERFECT_BONUS],
+        ['完美裱花 ×' + s.perfects, '+' + s.perfects * C.SCORE.PERFECT_BONUS],
         ['顶料水果 ×' + s.fruits, '+' + s.fruits * C.SCORE.FRUIT],
         ['摆放均匀', s.even > 0 ? '+' + s.even : '—']
       ];
@@ -1077,14 +1325,534 @@
     }
   };
 
+  /* ================================================================
+   * 状态 6：STATE_FREE_STAGE —— 草莓自由工坊（阶段 3，project.md 三.3）
+   * 每累计 2 单常规订单进入 1 次。仍走 饼胚→奶油→装饰 三步，
+   * 但全部自由操作：烤胚随便蓄力叠层、奶油点/按住拖动随手涂鸦、
+   * 装饰随手撒 —— 无订单、无目标刻度、无节拍校准、不判分。
+   * 转盘全程静止：落点所见即所得。
+   * ================================================================ */
+
+  var SUGAR_COLORS = ['#ffc94d', '#ff8fb5', '#8ed3f0', '#9ee493', '#c9a7f5'];
+
+  var FREE_STAGE = {
+    sub: 'bake',                    // bake → cream → topping
+    bar: null, settleT: 0,
+    colorIdx: 0, lastPt: null, creamFullSaid: false,
+    toppingType: 'strawberry', toppingFullSaid: false,
+    /* 布局：右下行动按钮（避开转盘）、底部调色盘 / 素材选择 */
+    btnNext: { x: 618, y: 1066, r: 86 },
+    swatchY: 1215, swatchR: 30, swatchGap: 84,
+    matY: 1215, matR: 54, matGap: 150,
+
+    enter: function () {
+      Game.cake = new E.Cake(C.FREE.PALETTE);
+      Game.cake.height = 0;   // 自由关从 0 层起叠，height = 各层之和
+      this.sub = 'bake';
+      this.bar = new E.ChargeBar(LAYOUT.barX, LAYOUT.barY, LAYOUT.barW, LAYOUT.barH, false);
+      this.settleT = 0;
+      this.colorIdx = 0;
+      this.lastPt = null;
+      this.creamFullSaid = false;
+      this.toppingType = 'strawberry';
+      this.toppingFullSaid = false;
+      spirits.vanilla.say(C.FREE.VANILLA.WELCOME);
+      showBanner('草莓自由工坊', '想怎么做都可以♪', 1.6);
+    },
+
+    /* ---- 子阶段切换 ---- */
+    subTo: function (next) {
+      this.sub = next;
+      this.lastPt = null;
+      if (next === 'cream') {
+        spirits.vanilla.say(C.FREE.VANILLA.CREAM);
+        showBanner('自由挤奶油♪', '点一点、拖一拖，颜色随便换', 1.5);
+      } else if (next === 'topping') {
+        spirits.vanilla.say(C.FREE.VANILLA.TOPPING);
+        showBanner('自由装饰♪', '草莓 · 马卡龙 · 糖粒，点哪落哪', 1.5);
+      }
+      log('自由工坊子阶段 → ' + next);
+    },
+
+    update: function (dt) {
+      if (this.sub === 'bake') {
+        this.bar.update(dt);
+        this.settleT += dt;
+      }
+    },
+
+    /* ---- 世界坐标 → 蛋糕局部极坐标（转盘静止，但仍减盘角保持自洽） ---- */
+    toLocal: function (p) {
+      var dx = p.x - LAYOUT.ttCx, dy = p.y - LAYOUT.ttCy;
+      return { a: Math.atan2(dy, dx) - Game.turntable.angle, r: Math.sqrt(dx * dx + dy * dy) };
+    },
+    onCake: function (p) {
+      var dx = p.x - LAYOUT.ttCx, dy = p.y - LAYOUT.ttCy;
+      return dx * dx + dy * dy <= Math.pow(Game.cake.topRadius * 0.95, 2);
+    },
+
+    /* ---- 挤一朵自由奶油花（伴随撒糖粉粒子群） ---- */
+    squeezeCream: function (p) {
+      var n = Game.cake.flowers.length;
+      if (n >= C.FREE.CREAM_MAX) {
+        if (!this.creamFullSaid) {
+          this.creamFullSaid = true;
+          Game.fx.text(LAYOUT.ttCx, LAYOUT.ttCy - 260, '奶油挤到极限啦♪', '#b48ead', 32);
+        }
+        return;
+      }
+      var loc = this.toLocal(p);
+      var color = C.FREE.CREAM_COLORS[this.colorIdx];
+      Game.cake.flowers.push({
+        a: loc.a, r: loc.r, tier: 'free', color: color,
+        scale: 0.8 + Math.random() * 0.45
+      });
+      Game.fx.burst(p.x, p.y, {
+        count: 4, colors: [color, '#ffffff', '#ffe6a1'],
+        speed: 110, shape: 'circle', size: 5, grav: 260
+      });
+    },
+
+    /* ---- 投放顶料：草莓 / 马卡龙（跟手缩放随机）/ 糖粒（一次一小撮星） ---- */
+    dropTopping: function (p) {
+      var used = Game.cake.fruits.length + this.sugarDrops();
+      if (used >= C.FREE.TOPPING_MAX) {
+        if (!this.toppingFullSaid) {
+          this.toppingFullSaid = true;
+          Game.fx.text(LAYOUT.ttCx, LAYOUT.ttCy - 260, '装饰位满啦，已经很华丽♪', '#b48ead', 32);
+        }
+        return;
+      }
+      var loc = this.toLocal(p);
+      if (this.toppingType === 'sugar') {
+        for (var k = 0; k < C.FREE.SUGAR_PER_DROP; k++) {
+          Game.cake.sugars.push({
+            a: loc.a + (Math.random() - 0.5) * 0.3,
+            r: Math.min(loc.r + (Math.random() - 0.5) * 46, Game.cake.topRadius * 0.95),
+            color: SUGAR_COLORS[Math.floor(Math.random() * SUGAR_COLORS.length)],
+            size: 6 + Math.random() * 6, rot: Math.random() * TAU
+          });
+        }
+        Game.fx.burst(p.x, p.y, {
+          count: 8, colors: SUGAR_COLORS, speed: 160, shape: 'star', size: 7, grav: 300
+        });
+      } else {
+        Game.cake.fruits.push({
+          a: loc.a, r: loc.r, type: this.toppingType,
+          scale: 0.85 + Math.random() * 0.5
+        });
+        Game.fx.burst(p.x, p.y, {
+          count: 8, colors: ['#ff8fb5', '#ffe6a1', '#ffffff'], speed: 180, grav: 300
+        });
+      }
+    },
+    sugarDrops: function () {
+      // 糖粒按"每次一撮"计数：用 5 颗一撮折算
+      return Math.ceil(Game.cake.sugars.length / C.FREE.SUGAR_PER_DROP);
+    },
+
+    /* ---- 命中检测 ---- */
+    hitBtn: function (p) {
+      var b = this.btnNext;
+      var dx = p.x - b.x, dy = p.y - b.y;
+      return dx * dx + dy * dy <= b.r * b.r;
+    },
+    hitSwatch: function (p) {
+      for (var i = 0; i < C.FREE.CREAM_COLORS.length; i++) {
+        var x = 375 + (i - (C.FREE.CREAM_COLORS.length - 1) / 2) * this.swatchGap;
+        var dx = p.x - x, dy = p.y - this.swatchY;
+        if (dx * dx + dy * dy <= Math.pow(this.swatchR + 16, 2)) return i;
+      }
+      return -1;
+    },
+    hitMaterial: function (p) {
+      var mats = ['strawberry', 'macaron', 'sugar'];
+      for (var i = 0; i < mats.length; i++) {
+        var x = 375 + (i - 1) * this.matGap;
+        var dx = p.x - x, dy = p.y - this.matY;
+        if (dx * dx + dy * dy <= Math.pow(this.matR + 14, 2)) return mats[i];
+      }
+      return null;
+    },
+
+    onDown: function (p) {
+      if (this.hitBtn(p)) {
+        if (this.sub === 'bake') this.subTo('cream');
+        else if (this.sub === 'cream') this.subTo('topping');
+        else setState('FREE_RESULT');
+        return;
+      }
+      if (this.sub === 'bake') {
+        if (Game.cake.layers.length >= C.FREE.LAYER_MAX) {
+          Game.fx.text(LAYOUT.plateX, LAYOUT.plateY - Game.cake.height - 60, '到天花板啦，去挤奶油吧♪', '#b48ead', 30);
+          return;
+        }
+        this.bar.start();
+        return;
+      }
+      if (this.sub === 'cream') {
+        var sw = this.hitSwatch(p);
+        if (sw >= 0) {
+          this.colorIdx = sw;
+          Game.fx.burst(375 + (sw - (C.FREE.CREAM_COLORS.length - 1) / 2) * this.swatchGap, this.swatchY,
+            { count: 6, colors: [C.FREE.CREAM_COLORS[sw], '#fff'], speed: 120, shape: 'circle', size: 5, grav: 200 });
+          return;
+        }
+      } else if (this.sub === 'topping') {
+        var m = this.hitMaterial(p);
+        if (m) {
+          this.toppingType = m;
+          Game.fx.burst(p.x, p.y, { count: 6, colors: ['#ff8fb5', '#fff'], speed: 120, shape: 'circle', size: 5, grav: 200 });
+          return;
+        }
+      }
+      if (this.onCake(p)) {
+        if (this.sub === 'cream') { this.squeezeCream(p); this.lastPt = p; }
+        else if (this.sub === 'topping') { this.dropTopping(p); this.lastPt = p; }
+      }
+    },
+
+    onMove: function (p) {
+      if (!this.lastPt) return;
+      var dx = p.x - this.lastPt.x, dy = p.y - this.lastPt.y;
+      var dist = Math.sqrt(dx * dx + dy * dy);
+      var step = this.sub === 'cream' ? C.FREE.CREAM_STEP : C.FREE.TOPPING_STEP;
+      if (dist >= step && this.onCake(p)) {
+        if (this.sub === 'cream') this.squeezeCream(p);
+        else this.dropTopping(p);
+        this.lastPt = p;
+      }
+    },
+
+    onUp: function () {
+      if (this.sub === 'bake') {
+        if (!this.bar.holding) return;
+        var pow = this.bar.release();
+        if (Game.cake.layers.length >= C.FREE.LAYER_MAX) return;
+        var h = Utils.lerp(C.FREE.LAYER_H_MIN, C.FREE.LAYER_H_MAX, pow);
+        Game.cake.layers.push({ h: h });
+        Game.cake.height += h;
+        this.settleT = 0;
+        var n = Game.cake.layers.length;
+        Game.fx.burst(LAYOUT.plateX, LAYOUT.plateY - Game.cake.height, {
+          count: 10, colors: ['#ffe9d2', '#ffd3e2', '#ffffff'], speed: 220, shape: 'circle', size: 7
+        });
+        Game.fx.text(LAYOUT.plateX, LAYOUT.plateY - Game.cake.height - 46, '第 ' + n + ' 层♪', '#e2557e', 38);
+        if (n >= C.FREE.LAYER_MAX) spirits.vanilla.say('直通天际！再也高不动啦♪');
+        else if (Math.random() < 0.4) spirits.vanilla.say(pick(C.SPIRIT.VANILLA.CHEER));
+        log('自由烤胚：第 ' + n + ' 层 h=' + h.toFixed(0) + '（power=' + pow.toFixed(2) + '）');
+      } else {
+        this.lastPt = null;
+      }
+    },
+
+    render: function (ctx, now) {
+      if (this.sub === 'bake') this.renderBake(ctx, now);
+      else if (this.sub === 'cream') this.renderCream(ctx, now);
+      else this.renderTopping(ctx, now);
+    },
+
+    /* ---- 子阶段 1：自由烤胚（侧视，反复蓄力叠层，无黄金区无判定） ---- */
+    renderBake: function (ctx, now) {
+      var n = Game.cake.layers.length;
+      drawStageTitle(ctx, '自由工坊 · 烤胚 ' + n + '/' + C.FREE.LAYER_MAX + ' 层');
+      // 操作台 + 盘子（同常规烤胚画面）
+      ctx.fillStyle = '#f7d9e5';
+      ctx.fillRect(0, LAYOUT.plateY, 750, 1334 - LAYOUT.plateY);
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.fillRect(0, LAYOUT.plateY, 750, 14);
+      ctx.fillStyle = Game.cake.palette.plate;
+      ctx.beginPath();
+      ctx.ellipse(LAYOUT.plateX, LAYOUT.plateY + 10, 210, 34, 0, 0, TAU);
+      ctx.fill();
+
+      // 已叠各层（新层落地弹跳）
+      if (n > 0) {
+        var sy = 1 - 0.3 * Math.exp(-5 * this.settleT) * Math.cos(15 * this.settleT);
+        var sx = 1 + (1 - sy) * 0.8;
+        Game.cake.renderSide(ctx, LAYOUT.plateX, LAYOUT.plateY, sx, sy);
+      }
+
+      // 蓄力条（自由版：无黄金区）+ 读数
+      this.bar.render(ctx, now);
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 30px "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.fillStyle = '#b06f92';
+      ctx.fillText(Math.round(this.bar.display * 100) + '%', LAYOUT.barX + 24, LAYOUT.barY - 18);
+      ctx.font = '24px "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.fillText('火力', LAYOUT.barX + 24, LAYOUT.barY + LAYOUT.barH + 34);
+      ctx.restore();
+
+      if (n >= C.FREE.LAYER_MAX) drawHint(ctx, '到天花板啦！点右下按钮去挤奶油♪');
+      else if (n === 0) drawHint(ctx, '长按蓄力烤出一层，想叠几层叠几层');
+      else drawHint(ctx, '继续长按再叠一层，或点右下按钮去挤奶油');
+      drawActionButton(ctx, this.btnNext.x, this.btnNext.y, this.btnNext.r,
+        ['挤奶油♪'], n >= C.FREE.LAYER_MAX ? 1 : 0.6, now);
+      renderSpirits(ctx, ['vanilla']);
+    },
+
+    /* ---- 子阶段 2：自由挤奶油（顶视，盘静止，点击/拖动涂鸦） ---- */
+    renderCream: function (ctx, now) {
+      var n = Game.cake.flowers.length;
+      drawStageTitle(ctx, '自由工坊 · 挤奶油 ' + n + '/' + C.FREE.CREAM_MAX);
+      renderTurntableScene(ctx, 1, Game.cake.palette.plate);
+
+      // 调色盘（当前色放大高亮）
+      for (var i = 0; i < C.FREE.CREAM_COLORS.length; i++) {
+        var x = 375 + (i - (C.FREE.CREAM_COLORS.length - 1) / 2) * this.swatchGap;
+        var sel = i === this.colorIdx;
+        var r = this.swatchR * (sel ? 1.2 : 1);
+        ctx.beginPath();
+        ctx.arc(x, this.swatchY, r, 0, TAU);
+        ctx.fillStyle = C.FREE.CREAM_COLORS[i];
+        ctx.fill();
+        ctx.lineWidth = sel ? 6 : 3;
+        ctx.strokeStyle = sel ? '#e2557e' : 'rgba(180,120,150,0.4)';
+        ctx.stroke();
+      }
+      drawHint(ctx, '点住拖动随手挤花，点色盘换颜色♪', 1300);
+      drawActionButton(ctx, this.btnNext.x, this.btnNext.y, this.btnNext.r,
+        ['去装饰♪'], 0.6, now);
+      renderSpirits(ctx, ['vanilla']);
+    },
+
+    /* ---- 子阶段 3：自由装饰（草莓 / 马卡龙 / 糖粒，跟手投放） ---- */
+    renderTopping: function (ctx, now) {
+      var used = Game.cake.fruits.length + this.sugarDrops();
+      drawStageTitle(ctx, '自由工坊 · 装饰 ' + used + '/' + C.FREE.TOPPING_MAX);
+      renderTurntableScene(ctx, 1, Game.cake.palette.plate);
+
+      // 素材选择钮：草莓 / 马卡龙 / 糖粒
+      var mats = ['strawberry', 'macaron', 'sugar'];
+      for (var i = 0; i < mats.length; i++) {
+        var x = 375 + (i - 1) * this.matGap;
+        var sel = mats[i] === this.toppingType;
+        ctx.beginPath();
+        ctx.arc(x, this.matY, this.matR * (sel ? 1.12 : 1), 0, TAU);
+        ctx.fillStyle = sel ? '#fff' : 'rgba(255,255,255,0.72)';
+        ctx.fill();
+        ctx.lineWidth = sel ? 6 : 3;
+        ctx.strokeStyle = sel ? '#e2557e' : 'rgba(180,120,150,0.4)';
+        ctx.stroke();
+        if (mats[i] === 'strawberry') E.drawStrawberry(ctx, x, this.matY, 1.35);
+        else if (mats[i] === 'macaron') E.drawMacaron(ctx, x, this.matY, 1.35);
+        else {
+          E.drawStar(ctx, x, this.matY, 22, 10, -Math.PI / 2);
+          ctx.fillStyle = '#ffc94d';
+          ctx.fill();
+        }
+      }
+      drawHint(ctx, '选好素材，点住蛋糕随手撒♪', 1300);
+      drawActionButton(ctx, this.btnNext.x, this.btnNext.y, this.btnNext.r,
+        ['完成♪'], 1, now);
+      renderSpirits(ctx, ['vanilla']);
+    }
+  };
+
+  /* ================================================================
+   * 状态 7：STATE_FREE_RESULT —— 自由工坊结算（只有彩虹屁）
+   * 全屏撒花 + 立绘弹出 + 彩虹屁矩阵称号 + 赞美短评 +
+   * 【收入日记相册】（toDataURL 存 localStorage，阶段 4 翻看）
+   * ================================================================ */
+
+  var FREE_RESULT = {
+    title: '', praise: '', metrics: null, saved: false,
+    confettiIdx: 0,
+    CONFETTI_AT: [0.15, 0.9, 1.7],      // 全屏撒花时间点（秒）
+    btnDiary: { x: 200, y: 1200, w: 320, h: 96 },
+    btnGo: { x: 548, y: 1200, w: 320, h: 96 },
+    READY_T: 1.5,
+
+    enter: function () {
+      this.metrics = this.collectMetrics();
+      this.title = this.buildTitle();
+      this.praise = pick(C.FREE.PRAISE);
+      this.saved = false;
+      this.confettiIdx = 0;
+      // 三精灵排排站立绘弹出（project.md：结算立绘弹出）
+      var EV = C.SPIRIT.POS.EVAL;
+      spirits.vanilla.setPos(EV.vanilla);
+      spirits.chocolat.setPos(EV.chocolat);
+      spirits.caramel.setPos(EV.caramel);
+      spirits.vanilla.bounce(0.1);
+      spirits.chocolat.bounce(0.4);
+      spirits.caramel.bounce(0.7);
+      spirits.vanilla.say(C.FREE.VANILLA.DONE);
+      ichigo.cheer();   // 主角滑到作品旁探出头 + 冒泡夸奖
+      log('自由工坊结算：' + JSON.stringify(this.metrics) + ' → 称号「' + this.title + '」');
+    },
+
+    exit: function () { restoreSpiritPos(); },
+
+    /** 指标采集：层数 / 奶油数 / 实际用色数 / 水果数 / 糖粒数 */
+    collectMetrics: function () {
+      var cake = Game.cake;
+      var colors = [];
+      for (var i = 0; i < cake.flowers.length; i++) {
+        if (cake.flowers[i].color && colors.indexOf(cake.flowers[i].color) < 0)
+          colors.push(cake.flowers[i].color);
+      }
+      return {
+        layers: cake.layers.length,
+        creams: cake.flowers.length,
+        colors: colors.length,
+        fruits: cake.fruits.length,
+        sugars: cake.sugars.length
+      };
+    },
+
+    /** 彩虹屁矩阵（project.md 三.3）：前缀(层数) + 中缀(奶油数) + 主体(色彩/顶料特征) */
+    buildTitle: function () {
+      var m = this.metrics;
+      var prefix = '', middle = '';
+      for (var i = 0; i < C.FREE.PREFIX_RULES.length; i++)
+        if (m.layers >= C.FREE.PREFIX_RULES[i].min) { prefix = C.FREE.PREFIX_RULES[i].text; break; }
+      for (var j = 0; j < C.FREE.MIDDLE_RULES.length; j++)
+        if (m.creams >= C.FREE.MIDDLE_RULES[j].min) { middle = C.FREE.MIDDLE_RULES[j].text; break; }
+      var mainKey;
+      if (m.colors >= 4) mainKey = 'rainbow';
+      else if (m.fruits + Math.ceil(m.sugars / C.FREE.SUGAR_PER_DROP) >= 12) mainKey = 'fruitBox';
+      else if (m.colors === 3) mainKey = 'macaron';
+      else if (m.fruits >= 8) mainKey = 'fruitTower';
+      else if (m.colors === 2) mainKey = 'duo';
+      else mainKey = 'classic';
+      return prefix + middle + C.FREE.MAIN[mainKey];
+    },
+
+    update: function (dt) {
+      // 定点全屏撒花（花瓣星 + 爱心心混搭）
+      if (this.confettiIdx < this.CONFETTI_AT.length &&
+          Game.t >= this.CONFETTI_AT[this.confettiIdx]) {
+        this.confettiIdx++;
+        var y = 200 + this.confettiIdx * 60;
+        Game.fx.burst(375, y, {
+          count: 26, colors: ['#ffc94d', '#ff8fb5', '#b8e6ff', '#c9a7f5', '#fff'],
+          speed: 460, shape: 'star', size: 10, grav: 380
+        });
+        Game.fx.burst(180, y + 120, {
+          count: 12, colors: ['#ff8fb5', '#ffd3e2'], speed: 380, shape: 'heart', size: 11, grav: 350
+        });
+        Game.fx.burst(570, y + 120, {
+          count: 12, colors: ['#8ed3f0', '#c9a7f5'], speed: 380, shape: 'heart', size: 11, grav: 350
+        });
+      }
+    },
+
+    /** 收入日记相册：蛋糕特写 → JPEG dataURL → localStorage（阶段 4 相册翻看） */
+    saveDiary: function () {
+      if (this.saved) { showBanner('已经在相册里啦♪', '', 1.4); return; }
+      try {
+        var S = 480;   // 特写正方形画布
+        var off = document.createElement('canvas');
+        off.width = off.height = S;
+        var c2 = off.getContext('2d');
+        c2.fillStyle = '#fff6f9';
+        c2.fillRect(0, 0, S, S);
+        var pr = S * 0.46;
+        E.Turntable.prototype.renderPlate(c2, S / 2, S / 2, pr, Game.cake.palette.plate);
+        c2.save();
+        c2.translate(S / 2, S / 2);
+        var sc = pr * 0.92 / Game.cake.topRadius;
+        c2.scale(sc, sc);
+        Game.cake.renderTop(c2);
+        c2.restore();
+        // 只含几何图形 → file:// 下画布不被污染，toDataURL 安全
+        var url = off.toDataURL('image/jpeg', 0.72);
+        var diary = [];
+        try { diary = JSON.parse(localStorage.getItem(C.FREE.DIARY_KEY) || '[]'); } catch (e) { /* 损坏则重建 */ }
+        diary.push({ ts: Date.now(), title: this.title, img: url });
+        while (diary.length > C.FREE.DIARY_MAX) diary.shift();
+        localStorage.setItem(C.FREE.DIARY_KEY, JSON.stringify(diary));
+        this.saved = true;
+        showBanner('已收入日记相册♪', '草莓的日记本（阶段 4 开放翻看）', 1.8);
+        log('日记相册：已保存第 ' + diary.length + ' 篇（' + this.title + '）');
+      } catch (err) {
+        showBanner('相册保存失败…', '浏览器存储可能已满', 1.8);
+        log('日记相册保存失败：' + (err && err.message));
+      }
+    },
+
+    onDown: function (p) {
+      if (Game.t < this.READY_T) return;
+      var d = this.btnDiary, g = this.btnGo;
+      if (p.x >= d.x - d.w / 2 && p.x <= d.x + d.w / 2 &&
+          p.y >= d.y - d.h / 2 && p.y <= d.y + d.h / 2) {
+        this.saveDiary();
+      } else if (p.x >= g.x - g.w / 2 && p.x <= g.x + g.w / 2 &&
+                 p.y >= g.y - g.h / 2 && p.y <= g.y + g.h / 2) {
+        setState('ORDER_SHOW');
+      }
+    },
+
+    render: function (ctx, now) {
+      var t = Game.t, m = this.metrics;
+      drawStageTitle(ctx, '自由工坊 · 大作发表');
+
+      // 作品 2D 缓转展示
+      ctx.save();
+      ctx.translate(375, 470);
+      var pop = Utils.clamp(t / 0.6, 0, 1);
+      var sc = Utils.lerp(0.5, 0.84, Utils.easeOutCubic(pop));
+      ctx.scale(sc, sc);
+      ctx.translate(-375, -470);
+      E.Turntable.prototype.renderPlate(ctx, 375, 470, 250, Game.cake.palette.plate);
+      ctx.translate(375, 470);
+      ctx.rotate(Game.turntable.angle);
+      Game.cake.renderTop(ctx);
+      ctx.restore();
+
+      // 彩虹屁称号（本关核心输出）+ 赞美短评
+      if (t > 0.7) {
+        var k = Utils.clamp((t - 0.7) / 0.4, 0, 1);
+        ctx.save();
+        ctx.globalAlpha = k;
+        ctx.translate(375, 780);
+        ctx.scale(Utils.lerp(1.3, 1, Utils.easeOutCubic(k)), Utils.lerp(1.3, 1, Utils.easeOutCubic(k)));
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 46px "PingFang SC", "Microsoft YaHei", sans-serif';
+        ctx.lineWidth = 10;
+        ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+        ctx.strokeText('「' + this.title + '」', 0, 0);
+        ctx.fillStyle = '#d1547f';
+        ctx.fillText('「' + this.title + '」', 0, 0);
+        ctx.restore();
+      }
+      if (t > 1.0) E.drawBubble(ctx, 375, 830, this.praise, 26);
+
+      // 创作指标小字（称号的依据，透明可查）
+      if (t > 1.2) {
+        ctx.save();
+        ctx.globalAlpha = Utils.clamp((t - 1.2) / 0.3, 0, 1);
+        ctx.textAlign = 'center';
+        ctx.font = '26px "PingFang SC", "Microsoft YaHei", sans-serif';
+        ctx.fillStyle = '#b06f92';
+        ctx.fillText(m.layers + ' 层饼胚 · ' + m.creams + ' 朵奶油 · ' + m.colors +
+          ' 种配色 · ' + (m.fruits + m.sugars) + ' 个装饰', 375, 1010);
+        ctx.restore();
+      }
+
+      // 双按钮：收入日记相册 / 继续接单
+      if (t > this.READY_T) {
+        drawPillButton(ctx, this.btnDiary, this.saved ? '已收入相册 ✓' : '收入日记相册', '#8ed3f0');
+        drawPillButton(ctx, this.btnGo, '继续接单 ♪', '#ff8fb5', now);
+      }
+
+      renderSpirits(ctx, ['vanilla', 'chocolat', 'caramel']);
+    }
+  };
+
   /* ================= 状态表 ================= */
 
   var States = {
+    TITLE: TITLE,
     ORDER_SHOW: ORDER_SHOW,
     BAKE_CHARGE: BAKE_CHARGE,
     PIPE_RHYTHM: PIPE_RHYTHM,
     TOPPING_DROP: TOPPING_DROP,
-    EVALUATION: EVALUATION
+    EVALUATION: EVALUATION,
+    FREE_STAGE: FREE_STAGE,
+    FREE_RESULT: FREE_RESULT
   };
 
   /* ================= 统一指针路由（单指游戏） ================= */
@@ -1095,6 +1863,11 @@
       if (activePointerId !== null) return;   // 忽略多余手指
       activePointerId = p.id;
       if (Game.cur && Game.cur.onDown) Game.cur.onDown(p);
+    },
+    onMove: function (p) {
+      // 仅活动指针的按住拖动才转发（自由工坊涂鸦用）
+      if (p.id !== activePointerId) return;
+      if (Game.cur && Game.cur.onMove) Game.cur.onMove(p);
     },
     onUp: function (p) {
       if (p.id !== activePointerId) return;
@@ -1108,7 +1881,26 @@
   var lastTime = performance.now();
   var fpsSmooth = 60;
 
+  /* rAF 停摆看门狗：WebView 被遮挡/最小化时 requestAnimationFrame 可能被
+   * 合成器完全节流（页面 JS 仍认为 visible），游戏会"冻住"——触摸还响应
+   * 但画面不动。1.5s 无新帧则改用 setTimeout 驱动，保证可玩性。 */
+  var rafKilled = false;
+  var lastFrameAt = performance.now();
+
+  function scheduleFrame() {
+    if (!rafKilled) requestAnimationFrame(frame);
+    else setTimeout(function () { frame(performance.now()); }, 16);   // rAF 会自动传时间戳，setTimeout 必须手动补
+  }
+
+  setInterval(function () {
+    if (!rafKilled && performance.now() - lastFrameAt > 1500) {
+      rafKilled = true;
+      scheduleFrame();
+    }
+  }, 500);
+
   function frame(now) {
+    lastFrameAt = now;
     var dt = Math.min((now - lastTime) / 1000, 0.05);
     lastTime = now;
     if (dt > 0) fpsSmooth = fpsSmooth * 0.95 + (1 / dt) * 0.05;
@@ -1119,9 +1911,10 @@
       Game.fx.update(dt);
       updateBanner(dt);
       updateSpirits(dt);
+      ichigo.update(dt);
       updateSlowmo(dt);
       // 转盘目标转速统一在此驱动（缓速 ×0.6 平滑趋近由 Turntable.update 内建 lerp 实现）；
-      // 各状态 enter 里的 syncToBeat / target 赋值仅作首帧兜底
+      // 各状态 enter 里的 target 赋值仅作首帧兜底
       var factor = slowmo.active ? 1 - C.SPIRIT.SLOW.REDUCE : 1;
       Game.turntable.target = baseOmega() * factor;
       Game.turntable.update(dt);
@@ -1133,6 +1926,7 @@
 
     renderBackground(ctx, now);
     if (Game.cur && Game.cur.render) Game.cur.render(ctx, now);
+    ichigo.render(ctx);   // 主角：场景之上、粒子特效之下（结算页会被 3D 层压住形成"探出头"构图）
     Game.fx.render(ctx);
     renderBanner(ctx);
     if (slowmo.active) renderSlowmoVeil(ctx);
@@ -1145,7 +1939,7 @@
     ctx.fillText('FPS ' + Math.round(fpsSmooth), 14, 1330 - 12);
     ctx.restore();
 
-    requestAnimationFrame(frame);
+    scheduleFrame();
   }
 
   resetScore();
@@ -1162,8 +1956,11 @@
       Game.cake.fruits.push({ a: dj / 5 * TAU + 0.3, r: 150, type: dj % 2 ? 'macaron' : 'strawberry' });
     Game.score.bake = 120; Game.score.flowers = 8; Game.score.perfects = 5; Game.score.fruits = 5;
     setState('EVALUATION');
+  } else if (/[?&]step=free/.test(location.search)) {
+    // 调试直跳：自由工坊（阶段 3），无需先打两单常规订单
+    setState('FREE_STAGE');
   } else {
-    setState('ORDER_SHOW');
+    setState('TITLE');   // 封面 → 点击开始 → 第一单
   }
   requestAnimationFrame(frame);
 
